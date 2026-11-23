@@ -468,6 +468,28 @@
   .ov-time{font-size:10.5px;color:var(--ink-soft);font-variant-numeric:tabular-nums;flex:0 0 auto;}
   .ov-empty{text-align:center;color:var(--ink-soft);font-size:12.5px;padding:34px 0;}
 
+  /* ---------- cloud sync ---------- */
+  .sync-btn.off{opacity:.5;}
+  .sync-btn.ok{color:var(--accent);}
+  .sync-btn.err{color:var(--p-red);}
+  .sync-btn.offline{color:var(--ink-soft);}
+  @keyframes syncPulse{0%,100%{opacity:1}50%{opacity:.3}}
+  .sync-btn.busy svg{animation:syncPulse 1s ease-in-out infinite;}
+  .sync-text{font-size:12.5px;color:var(--ink-2);line-height:1.55;margin:6px 0 12px;}
+  .sync-steps{margin:0 0 14px;padding-left:18px;font-size:12.5px;color:var(--ink-2);line-height:1.75;}
+  .sync-steps a{color:var(--accent-strong);font-weight:600;}
+  .sync-steps code{font-size:11.5px;background:var(--field);padding:1px 5px;border-radius:5px;}
+  .sync-input{width:100%;padding:10px 12px;border-radius:11px;border:1px solid var(--hairline);
+    background:var(--field);color:var(--ink);font-family:inherit;font-size:13px;}
+  .sync-input:focus{outline:none;border-color:var(--accent);}
+  .sync-err{color:var(--p-red);font-size:12px;margin-top:8px;}
+  .sync-status{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600;
+    color:var(--ink);margin:10px 0 2px;}
+  .sync-status .dot{width:8px;height:8px;border-radius:50%;background:var(--accent);flex:0 0 auto;}
+  .sync-status.err .dot{background:var(--p-red);}
+  .sync-status.busy .dot{background:var(--p-yellow);}
+  .sync-status.offline .dot{background:var(--ink-soft);}
+
   /* ---------- undo toast ---------- */
   #undoToast{
     position:fixed;left:50%;bottom:30px;transform:translateX(-50%) translateY(22px);
@@ -506,7 +528,7 @@
     .board{grid-template-columns:1fr;gap:12px;}
     footer{position:static;padding:6px 0 16px;}   /* end of page; fixed text overlapped cards while scrolling */
     .day{max-height:none;min-height:0;}
-    .add-input{font-size:16px;}   /* prevents iOS focus zoom */
+    .add-input,.sync-input{font-size:16px;}   /* prevents iOS focus zoom */
     .time-row input[type=time]{font-size:16px;}
   }
   @media (max-width:520px){
@@ -574,6 +596,7 @@
   </div>
 
   <div class="actions">
+    <button class="btn icon ghost sync-btn off" id="syncBtn" title="Eşitleme"></button>
     <button class="btn icon ghost" id="overviewBtn" title="Geçmiş & Gelecek">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
         stroke-linecap="round" stroke-linejoin="round">
@@ -610,6 +633,41 @@
 
 <div id="jumpPop" class="cal-pop"></div>
 <div id="ctx"></div>
+
+<!-- cloud sync -->
+<div class="overlay" id="syncOverlay">
+  <div class="modal" style="min-width:min(380px,92vw);max-width:min(460px,94vw)">
+    <h3><span class="mh-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg></span>Cihazlar arası eşitleme</h3>
+    <div id="syncOff">
+      <div class="sync-text">Notların GitHub'daki özel deponda (<b>ibrahim-todo-data</b>) saklanır.
+        Anahtarı girdiğin her cihaz aynı listeyi görür. Her cihazda bir kez yapılır.</div>
+      <ol class="sync-steps">
+        <li><a id="syncTokenLink" target="_blank" rel="noopener">Anahtar oluşturma sayfasını aç</a> (alanlar dolu gelir)</li>
+        <li><b>Repository access</b> altında <b>Only select repositories</b> seç, <b>ibrahim-todo-data</b>'yı işaretle</li>
+        <li><b>Generate token</b>'a bas, çıkan <code>github_pat_…</code> anahtarını kopyalayıp aşağı yapıştır</li>
+      </ol>
+      <input type="password" id="syncToken" class="sync-input" placeholder="github_pat_…"
+        autocomplete="off" autocapitalize="off" spellcheck="false" />
+      <div class="sync-err" id="syncErrOff"></div>
+      <div class="mrow">
+        <button class="btn" id="syncCancel">Vazgeç</button>
+        <button class="btn primary" id="syncConnect">Bağlan</button>
+      </div>
+    </div>
+    <div id="syncOn">
+      <div class="sync-status" id="syncStatus"></div>
+      <div class="sync-text">Depo: <b>ibrahimyyildirim/ibrahim-todo-data</b>. Değişikliklerin birkaç saniyede gönderilir;
+        uygulama açıkken diğer cihazlardaki değişiklikler yaklaşık 20 saniyede gelir.</div>
+      <div class="mrow">
+        <button class="btn" id="syncDisconnect" style="margin-right:auto">Bağlantıyı kes</button>
+        <button class="btn" id="syncClose">Kapat</button>
+        <button class="btn primary" id="syncNowBtn">Şimdi eşitle</button>
+      </div>
+    </div>
+  </div>
+</div>
 
 <!-- overdue tasks prompt -->
 <div class="overlay" id="overdueOverlay">
@@ -699,11 +757,19 @@
 // ---------- storage ----------
 const KEY = "ibrahim-todo-v1";
 const BKEY = KEY + "-backup";      // automatic backup snapshot
+// cloud sync state for this device (the sync module is further below)
+const SKEY = KEY + "-sync";        // {token}
+const MKEY = KEY + "-syncmeta";    // {snap, fields, dead, dirty}
+const SYNC_FIELDS = ["day","ord","text","done","priority","blurred","alarm","alarmFired"];
+function loadJson(k, def){ try{ const v = JSON.parse(localStorage.getItem(k)); return v == null ? def : v; }catch(e){ return def; } }
+let syncCfg = loadJson(SKEY, null), syncMeta = loadJson(MKEY, null);
+let syncState = "off", syncErr = "", lastSyncAt = 0, pushTimer = null, syncBusy = false, syncAgain = false, remoteEtag = null;
 let store = load();
 function load(){ try{ return JSON.parse(localStorage.getItem(KEY)) || {}; }catch(e){ return {}; } }
 function save(){
   localStorage.setItem(KEY, JSON.stringify(store));
   autoBackup();
+  syncTrack();
 }
 
 // ---------- automatic backup ----------
@@ -1436,8 +1502,21 @@ document.getElementById("importBtn").onclick=()=>document.getElementById("import
 document.getElementById("importFile").addEventListener("change",e=>{
   const f=e.target.files[0]; if(!f) return;
   const r=new FileReader();
-  r.onload=()=>{ try{ store=JSON.parse(r.result); save(); render(); }
-    catch(err){ alert("Geçersiz yedek dosyası."); } };
+  r.onload=()=>{ try{
+      // merge: add notes that aren't here yet, never drop the current ones
+      const inc=JSON.parse(r.result), have=new Set(Object.values(store).flat().map(t=>t.id));
+      for(const day in inc){
+        if(!Array.isArray(inc[day])) continue;
+        for(const t of inc[day]){
+          if(!t || !t.id || have.has(t.id)) continue;
+          const arr=getDay(day);
+          if(t.done) arr.push(t);
+          else{ let i=arr.findIndex(x=>x.done); if(i<0) i=arr.length; arr.splice(i,0,t); }
+          have.add(t.id);
+        }
+      }
+      save(); render();
+    }catch(err){ alert("Geçersiz yedek dosyası."); } };
   r.readAsText(f);
 });
 
@@ -1490,6 +1569,287 @@ setInterval(dayWatch,1000);
   }catch(e){}
 })();
 
+// ---------- cloud sync: a private GitHub repo shared by all devices ----------
+// Notes stay in localStorage; when connected, changes are merged into todo.json in a
+// private repo. Merge = newest change wins per field; deletions are kept as tombstones.
+const SYNC_OWNER = "ibrahimyyildirim", SYNC_REPO = "ibrahim-todo-data", SYNC_PATH = "todo.json";
+const SYNC_API = "https://api.github.com";
+const TOKEN_URL = "https://github.com/settings/personal-access-tokens/new?name=%C4%B0brahim+ToDo+sync"
+  + "&description=ibrahim-todo-data+okuma+yazma&target_name=" + SYNC_OWNER + "&expires_in=none&contents=write";
+
+function saveMeta(){ try{ localStorage.setItem(MKEY, JSON.stringify(syncMeta)); }catch(e){} }
+
+// board <-> flat map (id -> fields); ord = position inside the day
+function flatten(s){
+  const out = {};
+  for(const day in s){
+    (s[day]||[]).forEach((t,i)=>{
+      out[t.id] = { day, ord:i, text:t.text, done:!!t.done, priority:t.priority||0,
+        blurred:!!t.blurred, alarm:t.alarm||0, alarmFired:!!t.alarmFired };
+    });
+  }
+  return out;
+}
+function unflatten(flat){
+  const s = {};
+  Object.keys(flat).sort((a,b)=> flat[a].ord-flat[b].ord || (a<b?-1:1)).forEach(id=>{
+    const f = flat[id];
+    const t = { id, text:f.text, done:!!f.done, priority:f.priority||0, blurred:!!f.blurred };
+    if(f.alarm){ t.alarm=f.alarm; t.alarmFired=!!f.alarmFired; }
+    (s[f.day] = s[f.day] || []).push(t);
+  });
+  return s;
+}
+
+// note which fields changed since the last save (called from save())
+function syncTrack(noPush){
+  if(!syncCfg || !syncMeta) return;
+  const now = Date.now(), cur = flatten(store), prev = syncMeta.snap || {};
+  let changed = false;
+  for(const id in cur){
+    const f = syncMeta.fields[id] || (syncMeta.fields[id] = {});
+    if(!prev[id]){ SYNC_FIELDS.forEach(k=>f[k]=now); delete syncMeta.dead[id]; changed = true; continue; }
+    SYNC_FIELDS.forEach(k=>{ if(cur[id][k]!==prev[id][k]){ f[k]=now; changed = true; } });
+  }
+  for(const id in prev) if(!cur[id]){ syncMeta.dead[id]=now; delete syncMeta.fields[id]; changed = true; }
+  if(!changed) return;
+  syncMeta.snap = cur; syncMeta.dirty = true; saveMeta();
+  if(!noPush) schedulePush();
+}
+function schedulePush(delay){
+  if(!syncCfg) return;
+  clearTimeout(pushTimer); pushTimer = setTimeout(syncNow, delay || 2000);
+}
+
+function localDoc(){
+  const cur = flatten(store), tasks = {};
+  for(const id in cur) tasks[id] = Object.assign({}, cur[id], {_t: Object.assign({}, syncMeta.fields[id])});
+  return {v:1, tasks, dead: Object.assign({}, syncMeta.dead)};
+}
+function normDoc(d){
+  d = d && typeof d === "object" ? d : {};
+  return {v:1, tasks: d.tasks && typeof d.tasks === "object" ? d.tasks : {},
+    dead: d.dead && typeof d.dead === "object" ? d.dead : {}};
+}
+// per field the newest timestamp wins; ties go to b (the cloud copy)
+function mergeDocs(a, b){
+  const dead = Object.assign({}, a.dead);
+  for(const id in b.dead) dead[id] = Math.max(dead[id]||0, b.dead[id]);
+  const tasks = {};
+  for(const id of new Set([...Object.keys(a.tasks), ...Object.keys(b.tasks)])){
+    const x = a.tasks[id], y = b.tasks[id];
+    let m;
+    if(!x || !y) m = JSON.parse(JSON.stringify(x || y));
+    else{
+      m = {_t:{}};
+      SYNC_FIELDS.forEach(k=>{
+        const tx = (x._t||{})[k]||0, ty = (y._t||{})[k]||0;
+        if(tx > ty){ m[k]=x[k]; m._t[k]=tx; } else { m[k]=y[k]; m._t[k]=ty; }
+      });
+    }
+    m._t = m._t || {};
+    const newest = Math.max(0, ...SYNC_FIELDS.map(k=>m._t[k]||0));
+    if(dead[id] && dead[id] >= newest) continue;     // deleted after its last edit
+    delete dead[id];                                  // edited after a delete: keep it
+    tasks[id] = m;
+  }
+  // stable order numbers inside each day
+  const byDay = {};
+  for(const id in tasks) (byDay[tasks[id].day] = byDay[tasks[id].day] || []).push(id);
+  for(const day in byDay)
+    byDay[day].sort((p,q)=> tasks[p].ord-tasks[q].ord || (p<q?-1:1)).forEach((id,i)=>{ tasks[id].ord = i; });
+  const cutoff = Date.now() - 90*864e5;              // forget tombstones after 90 days
+  for(const id in dead) if(dead[id] < cutoff) delete dead[id];
+  return {v:1, tasks, dead};
+}
+function canon(v){
+  if(Array.isArray(v)) return "[" + v.map(canon).join(",") + "]";
+  if(v && typeof v === "object")
+    return "{" + Object.keys(v).sort().map(k=>JSON.stringify(k) + ":" + canon(v[k])).join(",") + "}";
+  return JSON.stringify(v === undefined ? null : v);
+}
+function applyDoc(doc){
+  const flat = {}, fields = {};
+  for(const id in doc.tasks){
+    const t = doc.tasks[id], f = {};
+    SYNC_FIELDS.forEach(k=>f[k]=t[k]);
+    flat[id] = f; fields[id] = Object.assign({}, t._t);
+  }
+  store = unflatten(flat);
+  localStorage.setItem(KEY, JSON.stringify(store));   // not save(): these are not local edits
+  autoBackup();
+  syncMeta.snap = flatten(store); syncMeta.fields = fields; syncMeta.dead = Object.assign({}, doc.dead);
+  saveMeta();
+}
+// re-render without losing an empty "Yeni not" field the cursor sits in
+function renderKeepFocus(){
+  const a = document.activeElement;
+  const key = a && a.classList && a.classList.contains("add-input") ? a.closest(".day").dataset.key : null;
+  render();
+  if(key){ const c = board.querySelector(`.day[data-key="${key}"] .add-input`); if(c) c.focus(); }
+}
+// don't swap the board out from under the user while they type, drag or use a dialog
+function userBusy(){
+  const a = document.activeElement;
+  const inSync = a && a.closest && a.closest("#syncOverlay");
+  if(a && !inSync && (a.isContentEditable || (a.tagName === "INPUT" && a.type !== "checkbox" && a.value))) return true;
+  return !!(document.querySelector(".overlay.open:not(#syncOverlay)") || ctx.style.display === "block" || dragInfo);
+}
+
+function b64ToUtf8(b64){
+  const bin = atob(b64.replace(/\s/g,"")), bytes = new Uint8Array(bin.length);
+  for(let i=0;i<bin.length;i++) bytes[i] = bin.charCodeAt(i);
+  return new TextDecoder().decode(bytes);
+}
+function utf8ToB64(str){
+  const bytes = new TextEncoder().encode(str);
+  let bin = "";
+  for(let i=0;i<bytes.length;i+=0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i+0x8000));
+  return btoa(bin);
+}
+function syncHeaders(extra){
+  return Object.assign({Authorization: "Bearer " + syncCfg.token, Accept: "application/vnd.github+json"}, extra || {});
+}
+function syncUrl(){ return `${SYNC_API}/repos/${SYNC_OWNER}/${SYNC_REPO}/contents/${SYNC_PATH}`; }
+function httpError(status, writing){
+  if(status === 401) return new Error("anahtar geçersiz ya da süresi dolmuş, yeniden bağlan");
+  if(status === 403) return new Error(writing ? "anahtarın yazma izni yok (Contents: Read and write olmalı)" : "anahtarın bu depoya izni yok");
+  return new Error("GitHub yanıtı " + status);
+}
+async function fetchRemote(useEtag){
+  const r = await fetch(syncUrl() + "?ref=main",
+    {headers: syncHeaders(useEtag && remoteEtag ? {"If-None-Match": remoteEtag} : null), cache: "no-store"});
+  if(r.status === 304) return {unchanged: true};
+  if(r.status === 404) return {doc: null, sha: null};
+  if(!r.ok) throw httpError(r.status, false);
+  const j = await r.json();
+  remoteEtag = r.headers.get("ETag");
+  return {doc: JSON.parse(b64ToUtf8(j.content || "")), sha: j.sha};
+}
+async function putRemote(doc, sha){
+  const body = {message: "sync " + new Date().toISOString(), content: utf8ToB64(JSON.stringify(doc)), branch: "main"};
+  if(sha) body.sha = sha;
+  const r = await fetch(syncUrl(), {method: "PUT", headers: syncHeaders({"Content-Type": "application/json"}),
+    body: JSON.stringify(body)});
+  if(r.status === 409 || r.status === 422) return false;   // another device wrote first
+  if(!r.ok) throw httpError(r.status, true);
+  remoteEtag = null;
+  return true;
+}
+
+async function syncNow(){
+  if(!syncCfg || !syncMeta) return;
+  if(syncBusy){ syncAgain = true; return; }
+  if(!navigator.onLine){ setSyncState("offline"); return; }
+  if(userBusy()){ schedulePush(3000); return; }
+  syncBusy = true; setSyncState("busy");
+  try{
+    for(let attempt = 0; attempt < 4; attempt++){
+      syncTrack(true);
+      const rem = await fetchRemote(!syncMeta.dirty);
+      if(rem.unchanged){ finishSync(); return; }        // nothing new on either side
+      const local = localDoc();
+      const remote = rem.doc ? normDoc(rem.doc) : null;
+      const merged = mergeDocs(local, remote || {v:1, tasks:{}, dead:{}});
+      if(canon(merged) !== canon(local)){
+        if(userBusy()){ schedulePush(3000); setSyncState(lastSyncAt ? "ok" : "busy"); return; }
+        applyDoc(merged); renderKeepFocus();
+      }
+      if(!remote || canon(merged) !== canon(remote)){
+        if(!(await putRemote(merged, rem.sha))){ remoteEtag = null; continue; }   // re-read and merge again
+      }
+      syncMeta.dirty = false; saveMeta();
+      finishSync(); return;
+    }
+    throw new Error("başka cihazla çakışma çözülemedi, tekrar denenecek");
+  }catch(e){
+    syncErr = String(e && e.message || e);
+    setSyncState(navigator.onLine ? "err" : "offline");
+  }finally{
+    syncBusy = false;
+    if(syncAgain){ syncAgain = false; schedulePush(1500); }
+  }
+}
+function finishSync(){ lastSyncAt = Date.now(); syncErr = ""; setSyncState("ok"); }
+
+// status icon (same line style as the other header icons) + dialog
+function hhmm(ts){ const d = new Date(ts); return pad(d.getHours()) + ":" + pad(d.getMinutes()); }
+function syncIcon(extra){
+  return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"
+    stroke-linejoin="round"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/>${extra || ""}</svg>`;
+}
+function syncLabel(){
+  return {off: "Eşitleme kapalı: bağlanmak için tıkla", busy: "Eşitleniyor…",
+    ok: "Eşitlendi" + (lastSyncAt ? " · " + hhmm(lastSyncAt) : ""),
+    offline: "Çevrimdışı: bağlantı gelince eşitlenecek", err: "Eşitleme hatası: " + syncErr}[syncState];
+}
+function setSyncState(s){
+  syncState = s;
+  const extra = {off: "", busy: '<path d="M12.5 16.5v-5M10.3 13.7l2.2-2.2 2.2 2.2"/>',
+    ok: '<path d="M9.5 14.2l1.8 1.8 3.4-3.6"/>', offline: '<path d="M3.5 3.5l17 17"/>',
+    err: '<path d="M12.5 11v3M12.5 16.6h.01"/>'}[s];
+  const b = document.getElementById("syncBtn");
+  b.innerHTML = syncIcon(extra); b.title = syncLabel();
+  b.className = "btn icon ghost sync-btn " + s;
+  renderSyncModal();
+}
+const syncOverlay = document.getElementById("syncOverlay");
+function renderSyncModal(){
+  document.getElementById("syncOff").style.display = syncCfg ? "none" : "";
+  document.getElementById("syncOn").style.display = syncCfg ? "" : "none";
+  const st = document.getElementById("syncStatus");
+  st.className = "sync-status " + syncState;
+  st.innerHTML = '<span class="dot"></span>';
+  st.appendChild(document.createTextNode(syncLabel()));
+}
+document.getElementById("syncTokenLink").href = TOKEN_URL;
+document.getElementById("syncBtn").onclick = ()=>{
+  document.getElementById("syncErrOff").textContent = "";
+  renderSyncModal();
+  syncOverlay.classList.add("open");
+  if(syncCfg) syncNow();
+};
+document.getElementById("syncConnect").onclick = async ()=>{
+  const input = document.getElementById("syncToken"), errEl = document.getElementById("syncErrOff");
+  const token = input.value.trim();
+  if(!token){ errEl.textContent = "Önce anahtarı yapıştır."; return; }
+  errEl.textContent = "Kontrol ediliyor…";
+  try{
+    const r = await fetch(`${SYNC_API}/repos/${SYNC_OWNER}/${SYNC_REPO}`,
+      {headers: {Authorization: "Bearer " + token, Accept: "application/vnd.github+json"}, cache: "no-store"});
+    if(r.status === 401){ errEl.textContent = "Anahtar geçersiz. Tamamını kopyaladığından emin ol."; return; }
+    if(!r.ok){ errEl.textContent = "Anahtar ibrahim-todo-data deposunu göremiyor. Oluştururken bu depoyu seçtiğinden emin ol."; return; }
+  }catch(e){ errEl.textContent = "GitHub'a ulaşılamadı, internet bağlantını kontrol et."; return; }
+  syncCfg = {token};
+  localStorage.setItem(SKEY, JSON.stringify(syncCfg));
+  // first time on this device: existing notes count as old, so on overlap the cloud copy wins
+  const snap = flatten(store), fields = {};
+  for(const id in snap) fields[id] = Object.fromEntries(SYNC_FIELDS.map(k=>[k, 1]));
+  syncMeta = {snap, fields, dead: {}, dirty: true};
+  saveMeta();
+  input.value = ""; errEl.textContent = "";
+  renderSyncModal();
+  await syncNow();
+};
+document.getElementById("syncDisconnect").onclick = ()=>{
+  if(!confirm("Bu cihazda eşitleme kapatılsın mı? Notların bu cihazda kalır.")) return;
+  syncCfg = null; syncMeta = null; remoteEtag = null; lastSyncAt = 0;
+  localStorage.removeItem(SKEY); localStorage.removeItem(MKEY);
+  setSyncState("off");
+};
+document.getElementById("syncNowBtn").onclick = ()=>syncNow();
+document.getElementById("syncClose").onclick = ()=>syncOverlay.classList.remove("open");
+document.getElementById("syncCancel").onclick = ()=>syncOverlay.classList.remove("open");
+syncOverlay.addEventListener("click", e=>{ if(e.target === syncOverlay) syncOverlay.classList.remove("open"); });
+
+// pull while the app is open and whenever it comes back to the foreground
+setInterval(()=>{ if(syncCfg && document.visibilityState === "visible") syncNow(); }, 20000);
+document.addEventListener("visibilitychange", ()=>{ if(syncCfg && document.visibilityState === "visible") syncNow(); });
+window.addEventListener("online", ()=>{ if(syncCfg) syncNow(); });
+window.addEventListener("offline", ()=>{ if(syncCfg) setSyncState("offline"); });
+setSyncState(syncCfg ? "busy" : "off");
+window.__todoSync = {now: syncNow, status: ()=>({state: syncState, err: syncErr, last: lastSyncAt, busy: syncBusy})};
+
 // ---------- installable app: offline cache + persistent storage ----------
 if("serviceWorker" in navigator && (location.protocol==="https:" || location.hostname==="localhost")){
   navigator.serviceWorker.register("sw.js").catch(()=>{});
@@ -1509,6 +1869,7 @@ if(navigator.storage && navigator.storage.persist) navigator.storage.persist().c
 
 render();
 promptOverdue();   // on load: ask about unfinished tasks from previous days
+if(syncCfg) syncNow();   // on load: pull the latest from the cloud
 </script>
 </body>
 </html>
