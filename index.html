@@ -255,7 +255,7 @@
     font-weight:600;flex:0 0 auto;font-variant-numeric:tabular-nums;
   }
 
-  .tasks{padding:7px 8px;overflow-y:auto;flex:1;min-height:48px;}
+  .tasks{padding:7px 8px;overflow-y:auto;overflow-x:hidden;flex:1;min-height:48px;position:relative;}
   .tasks::-webkit-scrollbar{width:8px;}
   .tasks::-webkit-scrollbar-thumb{background:var(--line);border-radius:8px;border:2px solid var(--card);}
   .tasks::-webkit-scrollbar-track{background:transparent;}
@@ -392,6 +392,53 @@
   #ctx button .cdot{display:inline-block;width:9px;height:9px;border-radius:50%;
     margin-right:9px;vertical-align:-.5px;}
   #ctx .sep{height:1px;background:var(--hairline);margin:5px 6px;}
+  #ctx .danger{color:var(--p-red);}
+  #ctx:not(.sheet) .mi{display:none;}
+
+  /* bottom sheet version of the menu (long-press on touch devices) */
+  @keyframes sheetUp{from{transform:translateY(28px);opacity:0;}to{transform:none;opacity:1;}}
+  @keyframes fadeIn{from{opacity:0;}to{opacity:1;}}
+  #ctxBackdrop{position:fixed;inset:0;z-index:75;background:rgba(8,11,15,.34);display:none;
+    animation:fadeIn .15s ease;}
+  #ctxBackdrop.open{display:block;}
+  #ctx.sheet{z-index:76;   /* above the undo toast (70), which would hide Sil / Vazgeç */
+    left:8px;right:8px;top:auto;bottom:calc(10px + env(safe-area-inset-bottom));
+    min-width:0;border-radius:22px;padding:8px;max-height:82vh;overflow-y:auto;
+    animation:sheetUp .22s cubic-bezier(.2,.8,.2,1);}
+  #ctx.sheet .ctx-title{font-size:13px;color:var(--ink-soft);padding:8px 12px 10px;line-height:1.4;
+    border-bottom:1px solid var(--hairline);margin-bottom:4px;
+    display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
+  #ctx.sheet button{display:flex;align-items:center;gap:13px;padding:12px 14px;font-size:15px;
+    border-radius:13px;color:var(--ink);}
+  #ctx.sheet button .mi{width:19px;height:19px;flex:0 0 auto;color:var(--ink-soft);}
+  #ctx.sheet button.danger,#ctx.sheet button.danger .mi{color:var(--p-red);}
+  #ctx.sheet button.cancel{justify-content:center;font-weight:650;background:var(--field);margin-top:6px;}
+  #ctx .pri-row{display:flex;gap:6px;padding:4px 2px;}
+  #ctx .pri-row button{flex:1;flex-direction:column;justify-content:center;gap:6px;padding:10px 4px;
+    font-size:12px;font-weight:600;background:var(--field);color:var(--ink-2);}
+  #ctx .pri-row button.sel{box-shadow:inset 0 0 0 1.5px var(--accent);color:var(--ink);}
+  #ctx .pri-row .cdot{margin:0;width:11px;height:11px;}
+  #ctx .cdot.none{border:1.5px solid var(--ink-soft);background:transparent;box-sizing:border-box;}
+
+  /* ---------- swipe actions on task rows (touch) ---------- */
+  .task{touch-action:pan-y;}
+  .task.swiping,.task.swipe-open{background:var(--card);z-index:1;animation:none;}
+  .task.snap{transition:transform .24s cubic-bezier(.2,.8,.2,1), background .12s ease;}
+  .swipe-layer{position:absolute;z-index:0;border-radius:12px;overflow:hidden;}
+  .swipe-layer .sl-left,.swipe-layer .sl-right{position:absolute;top:0;bottom:0;display:flex;opacity:0;}
+  .swipe-layer .sl-left{left:0;width:var(--lw,76px);}
+  .swipe-layer .sl-right{right:0;width:var(--rw,144px);}
+  .swipe-layer.show-l .sl-left,.swipe-layer.show-r .sl-right{opacity:1;}
+  .sl-btn{border:none;color:#fff;font-family:inherit;font-size:11px;font-weight:650;letter-spacing:.01em;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;
+    flex:0 0 72px;min-width:72px;padding:0 4px;cursor:pointer;overflow:hidden;white-space:nowrap;
+    transition:flex-basis .18s ease, min-width .18s ease, opacity .18s ease;}
+  .sl-btn svg{width:19px;height:19px;flex:0 0 auto;}
+  .sl-done{background:var(--accent);flex:1 1 76px;}
+  .sl-later{background:var(--p-yellow);}
+  .sl-del{background:var(--p-red);flex:1 1 72px;}
+  .swipe-layer.full .sl-later{flex-basis:0;min-width:0;opacity:0;padding:0;}
+  body.dark .sl-btn{color:#161B18;}
 
   /* ---------- modals ---------- */
   .overlay{
@@ -527,9 +574,21 @@
     .board-wrap{padding:12px 10px 8px;}
     .board{grid-template-columns:1fr;gap:12px;}
     footer{position:static;padding:6px 0 16px;}   /* end of page; fixed text overlapped cards while scrolling */
-    .day{max-height:none;min-height:0;}
+    .day{max-height:none;min-height:0;scroll-margin-top:calc(var(--hdr-h, 118px) + 10px);}
     .add-input,.sync-input{font-size:16px;}   /* prevents iOS focus zoom */
     .time-row input[type=time]{font-size:16px;}
+    html{overscroll-behavior-y:none;}         /* no rubber-band bounce: steadier scrolling */
+    header{-webkit-user-select:none;user-select:none;}
+    .day-head{padding:12px 14px 10px;}
+    .tasks{padding:5px 6px;}
+    .day.empty-day .tasks{display:none;}      /* empty days stay compact: header + add row */
+    .day.empty-day .add-row{border-top:none;}
+    .add-row{padding:8px 10px 11px;}
+    .add-input{padding:10px 12px;}
+    .add-btn{width:44px;}
+    #undoToast{left:12px;right:12px;transform:translateY(22px);justify-content:space-between;}
+    #undoToast.show{transform:none;}
+    #undoToast button{padding:9px 12px;font-size:14px;}
   }
   @media (max-width:520px){
     .modal{min-width:0;width:calc(100vw - 28px);padding:18px 16px 14px;}
@@ -539,9 +598,16 @@
 
   /* ---------- touch devices (no hover) ---------- */
   @media (hover:none){
-    .task .del{opacity:.4;}          /* delete always visible */
+    .task .del{display:none;}        /* swipe left to delete instead of the tiny × */
     .task .handle{display:none;}     /* html5 drag has no touch support */
-    .task{padding-left:12px;}
+    .task{padding:11px 12px;gap:12px;}
+    .check{width:22px;height:22px;border-radius:7px;margin-top:0;}
+    .check::before{content:"";position:absolute;inset:-11px;}   /* bigger tap area */
+    .check:checked::after{background-size:14px;}
+    .ttext{font-size:15px;line-height:1.45;}
+    .flag{padding:10px 8px;margin:-9px -8px -9px -4px;}         /* bigger tap area, same look */
+    .flag svg{width:18px;height:18px;}
+    .alarm-badge{font-size:11.5px;padding:3px 9px;}
     .day.weekend.empty-day{opacity:.55;}
     .task.blurred.reveal .ttext{filter:blur(0);}
     .task{-webkit-touch-callout:none;}   /* long-press opens our menu, not the iOS callout */
@@ -632,6 +698,7 @@
 </div>
 
 <div id="jumpPop" class="cal-pop"></div>
+<div id="ctxBackdrop"></div>
 <div id="ctx"></div>
 
 <!-- cloud sync -->
@@ -748,7 +815,7 @@
   </div>
 </div>
 
-<div id="undoToast"><span>Not silindi</span><button id="undoBtn">Geri al</button><div class="undo-bar" id="undoBar"></div></div>
+<div id="undoToast"><span id="undoMsg">Not silindi</span><button id="undoBtn">Geri al</button><div class="undo-bar" id="undoBar"></div></div>
 <footer><span id="backupInfo">otomatik yedek aktif</span></footer>
 
 <script>
@@ -812,6 +879,8 @@ let dragInfo = null;              // {fromKey, id}
 const activeAlarms = new Set();   // task ids blinking until dismissed
 
 function render(){
+  const sy = window.scrollY;      // keep the page where it was (sync refreshes re-render)
+  closeSwipe(true);
   board.innerHTML = "";
   const tkey = todayYmd();
   const weekStart = weekStartOf(anchor);
@@ -876,6 +945,7 @@ function render(){
     board.appendChild(day);
   }
   updateJumpLabel();
+  if(window.scrollY !== sy) window.scrollTo(0, sy);
 }
 
 function taskEl(key,t){
@@ -891,14 +961,8 @@ function taskEl(key,t){
     if(t.blurred && matchMedia("(hover:none)").matches) el.classList.toggle("reveal");
   });
 
-  // long-press opens the context menu on touch devices
-  let lpTimer=null;
-  el.addEventListener("touchstart",e=>{
-    const t0=e.touches[0];
-    lpTimer=setTimeout(()=>{ openCtx(t0.clientX,t0.clientY,key,t); },500);
-  },{passive:true});
-  el.addEventListener("touchmove",()=>clearTimeout(lpTimer),{passive:true});
-  el.addEventListener("touchend",()=>clearTimeout(lpTimer));
+  // touch: swipe left/right for actions, long-press for the action sheet
+  attachSwipe(el,key,t);
 
   // drag handle
   const handle = document.createElement("div");
@@ -980,6 +1044,7 @@ function taskEl(key,t){
 
   el.addEventListener("contextmenu",e=>{
     e.preventDefault();
+    if(matchMedia("(hover:none)").matches) return;   // touch: our long-press opens the sheet
     openCtx(e.clientX,e.clientY,key,t);
   });
 
@@ -1036,39 +1101,265 @@ function attachDrop(list,key){
 
 // ---------- context menu ----------
 const ctx = document.getElementById("ctx");
-function openCtx(x,y,key,t){
+const ctxBackdrop = document.getElementById("ctxBackdrop");
+// line icons shared by the menu and the swipe buttons (same 1.8 stroke as the header)
+const MI = {
+  edit:'<path d="M4 20h4L19 9l-4-4L4 16v4Z"/><path d="M13.5 6.5l4 4"/>',
+  alarm:'<circle cx="12" cy="13" r="7.5"/><path d="M12 9.8V13l2.6 1.8"/><path d="M4.5 4.5L7.5 7M19.5 4.5L16.5 7"/>',
+  move:'<rect x="3.5" y="5" width="17" height="15.5" rx="4"/><path d="M8 3v4M16 3v4M3.5 10h17M11 14l2.5 2.5L11 19"/>',
+  later:'<path d="M4 12h13"/><path d="M13 7l5 5-5 5"/><path d="M20.5 5v14"/>',
+  blur:'<path d="M3 3l18 18"/><path d="M10.6 5.2A9.6 9.6 0 0 1 12 5c5 0 9 5 9 7 0 .9-.6 2-1.7 3.3M6.6 6.6C4.4 8 3 10.4 3 12c0 2 4 7 9 7 1.6 0 3-.4 4.3-1.1"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/>',
+  eye:'<path d="M3 12c0-2 4-7 9-7s9 5 9 7-4 7-9 7-9-5-9-7Z"/><circle cx="12" cy="12" r="3"/>',
+  check:'<path d="M5 12.5l4.2 4.2L19 7"/>',
+  undo:'<path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/>',
+  trash:'<path d="M4 7h16M9 7V4.5h6V7M6.5 7l1 13h9l1-13"/>'
+};
+function mIcon(k){
+  return `<svg class="mi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+    stroke-linecap="round" stroke-linejoin="round">${MI[k]}</svg>`;
+}
+// desktop: small menu at the cursor; touch (asSheet): bottom sheet with big rows
+function openCtx(x,y,key,t,asSheet){
+  const sheet=!!asSheet;
   ctx.innerHTML="";
+  ctx.classList.toggle("sheet",sheet);
   const dot={green:"var(--p-green)",yellow:"var(--p-yellow)",red:"var(--p-red)"};
-  const mk=(label,fn,color)=>{
+  const mk=(label,fn,icon,cls)=>{
     const b=document.createElement("button");
-    if(color){
-      b.innerHTML=`<span class="cdot" style="background:${dot[color]}"></span>${label}`;
-    }else{
-      b.textContent=label;
-    }
-    b.onclick=()=>{fn();closeCtx();};ctx.appendChild(b);
+    b.innerHTML=(icon?mIcon(icon):"")+"<span></span>";
+    b.lastChild.textContent=label;
+    if(cls) b.className=cls;
+    b.onclick=()=>{ closeCtx(); fn(); };
+    ctx.appendChild(b); return b;
   };
-  mk(t.alarm?`Alarm: ${fmtAlarm(t.alarm)} — değiştir`:"Alarm kur…",()=>openAlarmModal(key,t));
-  mk("Başka güne taşı…",()=>openMoveModal(key,t));
-  const sepA=document.createElement("div");sepA.className="sep";ctx.appendChild(sepA);
-  mk(t.blurred?"Gizlemeyi kaldır":"Notu gizle (buzla)",()=>{t.blurred=!t.blurred;save();render();});
-  const sep=document.createElement("div");sep.className="sep";ctx.appendChild(sep);
-  mk("Yüksek öncelik",()=>{t.priority="red";save();render();},"red");
-  mk("Orta öncelik",()=>{t.priority="yellow";save();render();},"yellow");
-  mk("Düşük öncelik",()=>{t.priority="green";save();render();},"green");
-  mk("Önceliği kaldır",()=>{t.priority=0;save();render();});
-  const sep2=document.createElement("div");sep2.className="sep";ctx.appendChild(sep2);
-  mk(t.done?"Tamamlandı işaretini kaldır":"Tamamlandı işaretle",()=>setDone(key,t,!t.done));
-  mk("Sil",()=>deleteTask(key,t.id));
+  const sep=()=>{ const s=document.createElement("div"); s.className="sep"; ctx.appendChild(s); };
+  if(sheet){ const ti=document.createElement("div"); ti.className="ctx-title"; ti.textContent=t.text; ctx.appendChild(ti); }
+  mk("Düzenle",()=>startEdit(key,t.id),"edit");
+  mk(t.alarm?`Alarm: ${fmtAlarm(t.alarm)} · değiştir`:"Alarm kur…",()=>openAlarmModal(key,t),"alarm");
+  mk("Başka güne taşı…",()=>openMoveModal(key,t),"move");
+  mk(key<todayYmd()?"Bugüne taşı":"Ertele (ertesi gün)",()=>postponeTask(key,t.id),"later");
+  sep();
+  mk(t.blurred?"Gizlemeyi kaldır":"Notu gizle (buzla)",()=>{t.blurred=!t.blurred;save();render();},t.blurred?"eye":"blur");
+  sep();
+  if(sheet){
+    const row=document.createElement("div"); row.className="pri-row";
+    [["red","Yüksek"],["yellow","Orta"],["green","Düşük"],[0,"Yok"]].forEach(([p,label])=>{
+      const b=document.createElement("button");
+      if((t.priority||0)===p) b.classList.add("sel");
+      b.innerHTML=(p?`<span class="cdot" style="background:${dot[p]}"></span>`:`<span class="cdot none"></span>`)+"<span></span>";
+      b.lastChild.textContent=label;
+      b.onclick=()=>{ closeCtx(); t.priority=p; save(); render(); };
+      row.appendChild(b);
+    });
+    ctx.appendChild(row);
+  }else{
+    [["red","Yüksek öncelik"],["yellow","Orta öncelik"],["green","Düşük öncelik"]].forEach(([p,label])=>{
+      mk(label,()=>{t.priority=p;save();render();})
+        .insertAdjacentHTML("afterbegin",`<span class="cdot" style="background:${dot[p]}"></span>`);
+    });
+    mk("Önceliği kaldır",()=>{t.priority=0;save();render();});
+  }
+  sep();
+  mk(t.done?"Tamamlandı işaretini kaldır":"Tamamlandı işaretle",()=>setDone(key,t,!t.done),t.done?"undo":"check");
+  mk("Sil",()=>deleteTask(key,t.id),"trash","danger");
+  if(sheet) mk("Vazgeç",()=>{},null,"cancel");
 
   ctx.style.display="block";
-  const w=ctx.offsetWidth,h=ctx.offsetHeight;
-  ctx.style.left=Math.min(x,innerWidth-w-8)+"px";
-  ctx.style.top=Math.min(y,innerHeight-h-8)+"px";
+  if(sheet){
+    ctx.style.left=""; ctx.style.top="";
+    ctxBackdrop.classList.add("open");
+  }else{
+    const w=ctx.offsetWidth,h=ctx.offsetHeight;
+    ctx.style.left=Math.min(x,innerWidth-w-8)+"px";
+    ctx.style.top=Math.min(y,innerHeight-h-8)+"px";
+  }
 }
-function closeCtx(){ ctx.style.display="none"; }
-document.addEventListener("click",closeCtx);
-document.addEventListener("scroll",closeCtx,true);
+function closeCtx(){ ctx.style.display="none"; ctx.classList.remove("sheet"); ctxBackdrop.classList.remove("open"); }
+document.addEventListener("click",e=>{ if(!ctx.contains(e.target)) closeCtx(); });   // menu buttons close it themselves
+document.addEventListener("scroll",e=>{
+  if(ctx.classList.contains("sheet") && ctx.contains(e.target)) return;   // scrolling inside the sheet
+  closeCtx();
+},true);
+
+// put the caret at the end of a note's text (menu "Düzenle"; double-tap is unreliable on iPhone)
+function startEdit(key,id){
+  const tx=board.querySelector(`.day[data-key="${key}"] .task[data-id="${id}"] .ttext`);
+  if(!tx) return;
+  tx.contentEditable="true"; tx.focus();
+  const r=document.createRange(); r.selectNodeContents(tx); r.collapse(false);
+  const s=getSelection(); s.removeAllRanges(); s.addRange(r);
+}
+
+// past notes come to today, today's/future notes move one day later
+function postponeTask(key,id){
+  const arr=store[key]||[];
+  const idx=arr.findIndex(x=>x.id===id);
+  if(idx<0) return;
+  const td=todayYmd();
+  const target=key<td ? td : ymd(addDays(parseYmd(key),1));
+  const [item]=arr.splice(idx,1);
+  const dest=getDay(target);
+  if(item.done) dest.push(item);
+  else{ let i=dest.findIndex(x=>x.done); if(i<0) i=dest.length; dest.splice(i,0,item); }
+  save(); render();
+  const d=parseYmd(target);
+  showUndo(target===td ? "Bugüne taşındı" : `Ertelendi: ${DOWS[d.getDay()]} ${d.getDate()} ${MON[d.getMonth()]}`, ()=>{
+    const a=getDay(target), j=a.findIndex(x=>x.id===id);
+    if(j>=0) a.splice(j,1);
+    const b=getDay(key); b.splice(Math.min(idx,b.length),0,item);
+  });
+}
+
+// ---------- touch: swipe actions on rows ----------
+// swipe left: Ertele + Sil (pull all the way = delete); swipe right: Tamamla. Long-press: action sheet.
+const SW_RIGHT_OPEN=144, SW_LEFT_OPEN=76;
+let openSwipe=null;                 // {el, layer, offset}
+let touchActive=false, lastScrollTs=0, suppressClickUntil=0;
+window.addEventListener("scroll",()=>{ lastScrollTs=Date.now(); if(openSwipe) closeSwipe(); },{passive:true});
+// a tap that only closes an open row (or ends a swipe/long-press) must not also hit what's under it
+document.addEventListener("click",e=>{
+  if(Date.now()<suppressClickUntil){ e.stopPropagation(); e.preventDefault(); }
+},true);
+document.addEventListener("pointerdown",e=>{
+  if(e.pointerType==="touch") touchActive=true;
+  if(openSwipe && !openSwipe.el.contains(e.target) && !openSwipe.layer.contains(e.target)){
+    closeSwipe(); suppressClickUntil=Date.now()+400;
+  }
+},true);
+const touchUp=e=>{ if(e.pointerType==="touch") setTimeout(()=>{ touchActive=false; },250); };
+document.addEventListener("pointerup",touchUp,true);
+document.addEventListener("pointercancel",touchUp,true);
+
+function swipeIcon(k){
+  return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+    stroke-linejoin="round">${MI[k]}</svg>`;
+}
+function ensureLayer(el,key,t){
+  if(openSwipe && openSwipe.el===el) return openSwipe.layer;
+  if(openSwipe) closeSwipe(true);
+  const layer=document.createElement("div");
+  layer.className="swipe-layer";
+  layer.style.cssText=`top:${el.offsetTop}px;left:${el.offsetLeft}px;width:${el.offsetWidth}px;height:${el.offsetHeight}px`;
+  layer.innerHTML=`<div class="sl-left"><button class="sl-btn sl-done">${swipeIcon(t.done?"undo":"check")}<span>${t.done?"Geri al":"Tamamla"}</span></button></div>
+    <div class="sl-right"><button class="sl-btn sl-later">${swipeIcon("later")}<span>${key<todayYmd()?"Bugüne":"Ertele"}</span></button><button class="sl-btn sl-del">${swipeIcon("trash")}<span>Sil</span></button></div>`;
+  layer.querySelector(".sl-done").onclick=e=>{ e.stopPropagation(); closeSwipe(true); setDone(key,t,!t.done); };
+  layer.querySelector(".sl-later").onclick=e=>{ e.stopPropagation(); closeSwipe(true); postponeTask(key,t.id); };
+  layer.querySelector(".sl-del").onclick=e=>{ e.stopPropagation(); slideOutAndDelete(el,layer,key,t.id); };
+  el.parentElement.insertBefore(layer,el.parentElement.firstChild);
+  openSwipe={el,layer,offset:0};
+  return layer;
+}
+function setSwipe(el,layer,dx,width){
+  el.style.transform=dx ? `translateX(${dx}px)` : "";
+  layer.style.setProperty("--lw",Math.max(SW_LEFT_OPEN,dx)+"px");
+  layer.style.setProperty("--rw",Math.max(SW_RIGHT_OPEN,-dx)+"px");
+  const fullL=-dx>width*0.55;
+  if(fullL!==layer.classList.contains("full")){ layer.classList.toggle("full",fullL); if(navigator.vibrate) navigator.vibrate(8); }
+  layer.classList.toggle("show-l",dx>0); layer.classList.toggle("show-r",dx<0);
+  if(openSwipe && openSwipe.el===el) openSwipe.offset=dx;
+}
+function snapTo(el,layer,x){
+  el.classList.remove("swiping"); el.classList.add("snap","swipe-open");
+  setSwipe(el,layer,x,el.offsetWidth);
+}
+function closeSwipe(instant){
+  if(!openSwipe) return;
+  const {el,layer}=openSwipe;
+  openSwipe=null;
+  if(instant || !el.isConnected){
+    layer.remove(); el.style.transform=""; el.classList.remove("swiping","swipe-open","snap");
+    return;
+  }
+  el.classList.add("snap"); el.style.transform="";
+  setTimeout(()=>{ layer.remove(); el.classList.remove("swiping","swipe-open","snap"); },240);
+}
+function slideOutAndDelete(el,layer,key,id){
+  const w=el.offsetWidth;
+  el.classList.add("snap"); el.style.transform=`translateX(${-w-20}px)`;
+  layer.classList.add("full"); layer.style.setProperty("--rw",(w+20)+"px");
+  setTimeout(()=>{ closeSwipe(true); deleteTask(key,id); },200);
+}
+function attachSwipe(el,key,t){
+  let sx=0, sy=0, base=0, dx=0, mode=null, pid=null, lp=null, layer=null, width=0;
+  el.addEventListener("pointerdown",e=>{
+    if(e.pointerType!=="touch" || !e.isPrimary) return;
+    if(el.querySelector('.ttext[contenteditable="true"]')) return;     // typing: leave the row alone
+    sx=e.clientX; sy=e.clientY; dx=0; mode="pending"; pid=e.pointerId;
+    base=openSwipe && openSwipe.el===el ? openSwipe.offset : 0;
+    clearTimeout(lp);
+    lp=setTimeout(()=>{
+      if(mode!=="pending") return;
+      mode="longpress";
+      suppressClickUntil=Date.now()+700;
+      if(navigator.vibrate) navigator.vibrate(12);
+      closeSwipe(true);
+      openCtx(sx,sy,key,t,true);
+    },480);
+  });
+  el.addEventListener("pointermove",e=>{
+    if(e.pointerId!==pid || !mode) return;
+    if(mode==="pending"){
+      const mx=e.clientX-sx, my=e.clientY-sy;
+      if(Math.abs(mx)>10 && Math.abs(mx)>Math.abs(my)*1.2){
+        mode="swipe"; clearTimeout(lp);
+        try{ el.setPointerCapture(pid); }catch(_){}
+        width=el.offsetWidth;
+        layer=ensureLayer(el,key,t);
+        el.classList.remove("snap"); el.classList.add("swiping");
+        sx=e.clientX;                                   // continue from here, no jump
+      }else if(Math.abs(my)>10){ mode=null; clearTimeout(lp); return; }
+      else return;
+    }
+    if(mode!=="swipe") return;
+    dx=Math.max(-width*0.92,Math.min(width*0.9,base+(e.clientX-sx)));
+    setSwipe(el,layer,dx,width);
+  });
+  const end=e=>{
+    if(e.pointerId!==pid) return;
+    clearTimeout(lp);
+    const wasPending=mode==="pending";
+    if(mode==="swipe"){
+      suppressClickUntil=Date.now()+350;
+      const cancel=e.type==="pointercancel";
+      if(!cancel && -dx>width*0.55) slideOutAndDelete(el,layer,key,t.id);
+      else if(!cancel && dx>width*0.45){ closeSwipe(); setTimeout(()=>setDone(key,t,!t.done),160); }
+      else if(!cancel && -dx>SW_RIGHT_OPEN*0.45) snapTo(el,layer,-SW_RIGHT_OPEN);
+      else if(!cancel && dx>SW_LEFT_OPEN*0.55) snapTo(el,layer,SW_LEFT_OPEN);
+      else closeSwipe();
+    }else if(wasPending && openSwipe && openSwipe.el===el){
+      closeSwipe(); suppressClickUntil=Date.now()+350;   // tap on an open row just closes it
+    }
+    mode=null; pid=null;
+  };
+  el.addEventListener("pointerup",end);
+  el.addEventListener("pointercancel",end);
+}
+
+// phone: bring a day into view under the sticky header
+function scrollToDay(key,smooth){
+  if(!matchMedia("(max-width:720px)").matches) return;
+  const c=board.querySelector(`.day[data-key="${key}"]`);
+  if(!c) return;
+  document.documentElement.style.setProperty("--hdr-h",document.querySelector("header").offsetHeight+"px");
+  c.scrollIntoView({block:"start",behavior:smooth?"smooth":"auto"});
+}
+// one-time hint on touch devices: the first open note peeks its swipe actions
+function swipeHintOnce(){
+  if(!matchMedia("(hover:none)").matches || document.querySelector(".overlay.open")) return;
+  try{ if(localStorage.getItem(KEY+"-swipehint")) return; }catch(e){ return; }
+  const el=board.querySelector(".task:not(.done)");
+  if(!el) return;
+  try{ localStorage.setItem(KEY+"-swipehint","1"); }catch(e){}
+  setTimeout(()=>{
+    if(openSwipe || !el.isConnected) return;
+    const k=el.closest(".day").dataset.key, t=(store[k]||[]).find(x=>x.id===el.dataset.id);
+    if(!t) return;
+    const layer=ensureLayer(el,k,t);
+    el.classList.add("swiping","snap");
+    setSwipe(el,layer,-SW_RIGHT_OPEN*0.7,el.offsetWidth);
+    setTimeout(()=>closeSwipe(),1000);
+  },900);
+}
 
 // ---------- done toggle: completed tasks sink to the bottom ----------
 function setDone(key,t,val){
@@ -1089,9 +1380,10 @@ function setDone(key,t,val){
 }
 
 // ---------- delete with 5s undo ----------
-let lastDeleted=null, undoTimer=null;
+let undoFn=null, undoTimer=null;
 const undoToast=document.getElementById("undoToast");
 const undoBar=document.getElementById("undoBar");
+const undoMsg=document.getElementById("undoMsg");
 function startUndoBar(){
   undoBar.style.transition="none";
   undoBar.style.width="100%";
@@ -1099,25 +1391,26 @@ function startUndoBar(){
   undoBar.style.transition="width 5s linear";
   undoBar.style.width="0%";
 }
+// one toast for every undoable action (delete, postpone)
+function showUndo(msg,fn){
+  undoFn=fn; undoMsg.textContent=msg;
+  clearTimeout(undoTimer);
+  undoToast.classList.add("show");
+  startUndoBar();
+  undoTimer=setTimeout(()=>{ undoToast.classList.remove("show"); undoFn=null; },5000);
+}
 function deleteTask(key,id){
   const arr=store[key]||[];
   const idx=arr.findIndex(x=>x.id===id);
   if(idx<0) return;
   const [item]=arr.splice(idx,1);
-  lastDeleted={key,index:idx,item};
   save(); render();
-  clearTimeout(undoTimer);
-  undoToast.classList.add("show");
-  startUndoBar();
-  undoTimer=setTimeout(()=>{ undoToast.classList.remove("show"); lastDeleted=null; },5000);
+  showUndo("Not silindi",()=>{ const a=getDay(key); a.splice(Math.min(idx,a.length),0,item); });
 }
 document.getElementById("undoBtn").onclick=()=>{
-  if(!lastDeleted){ undoToast.classList.remove("show"); return; }
-  const arr=getDay(lastDeleted.key);
-  arr.splice(Math.min(lastDeleted.index,arr.length),0,lastDeleted.item);
-  lastDeleted=null; clearTimeout(undoTimer);
+  const fn=undoFn; undoFn=null; clearTimeout(undoTimer);
   undoToast.classList.remove("show");
-  save(); render();
+  if(fn){ fn(); save(); render(); }
 };
 
 // ---------- custom calendar component ----------
@@ -1189,7 +1482,7 @@ function updateJumpLabel(){
 }
 function openJump(){
   buildCalendar(jumpPop,{value:anchor,keepOpen:false,onPick:d=>{
-    anchor=d; render(); closeJump();
+    anchor=d; render(); closeJump(); scrollToDay(ymd(d),true);
   }});
   jumpPop.classList.add("open");
   const r=jumpBtn.getBoundingClientRect();
@@ -1480,9 +1773,10 @@ ovTabFuture.onclick=()=>{ ovTab="future"; renderOverview(); };
 ovOverlay.addEventListener("click",e=>{ if(e.target===ovOverlay) ovOverlay.classList.remove("open"); });
 
 // ---------- toolbar ----------
-document.getElementById("prevWeek").onclick=()=>{ anchor=addDays(anchor,-7); render(); };
-document.getElementById("nextWeek").onclick=()=>{ anchor=addDays(anchor,7); render(); };
-document.getElementById("goToday").onclick=()=>{ anchor=new Date(); render(); };
+const isPhone=()=>matchMedia("(max-width:720px)").matches;
+document.getElementById("prevWeek").onclick=()=>{ anchor=addDays(anchor,-7); render(); if(isPhone()) window.scrollTo(0,0); };
+document.getElementById("nextWeek").onclick=()=>{ anchor=addDays(anchor,7); render(); if(isPhone()) window.scrollTo(0,0); };
+document.getElementById("goToday").onclick=()=>{ anchor=new Date(); render(); scrollToDay(todayYmd(),true); };
 
 // more menu (backup actions)
 const moreBtn=document.getElementById("moreBtn");
@@ -1693,6 +1987,7 @@ function userBusy(){
   const a = document.activeElement;
   const inSync = a && a.closest && a.closest("#syncOverlay");
   if(a && !inSync && (a.isContentEditable || (a.tagName === "INPUT" && a.type !== "checkbox" && a.value))) return true;
+  if(touchActive || openSwipe || Date.now() - lastScrollTs < 900) return true;   // finger down or still scrolling
   return !!(document.querySelector(".overlay.open:not(#syncOverlay)") || ctx.style.display === "block" || dragInfo);
 }
 
@@ -1869,6 +2164,8 @@ if(navigator.storage && navigator.storage.persist) navigator.storage.persist().c
 
 render();
 promptOverdue();   // on load: ask about unfinished tasks from previous days
+scrollToDay(todayYmd(),false);   // phone: open at today
+swipeHintOnce();
 if(syncCfg) syncNow();   // on load: pull the latest from the cloud
 </script>
 </body>
