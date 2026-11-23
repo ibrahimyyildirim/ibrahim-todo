@@ -1,0 +1,10 @@
+# Allowlist: only the app itself is published to GitHub Pages.
+# Everything else stays local (kurtarma.html holds recovered personal notes and must never be pushed).
+*
+!.gitignore
+!.nojekyll
+!index.html
+!manifest.webmanifest
+!sw.js
+!icons/
+!icons/*.png
