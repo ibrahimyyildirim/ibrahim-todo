@@ -440,6 +440,12 @@
   .swipe-layer.full .sl-later{flex-basis:0;min-width:0;opacity:0;padding:0;}
   body.dark .sl-btn{color:#161B18;}
 
+  /* press-and-hold: the row lifts; moving the finger drags it to a new place */
+  .task.lifted{transform:scale(1.02);box-shadow:var(--shadow-lg);background:var(--card);z-index:2;
+    transition:transform .15s ease, box-shadow .15s ease;}
+  .drag-ghost{position:fixed;margin:0;pointer-events:none;z-index:80;background:var(--card);
+    box-shadow:var(--shadow-lg);will-change:transform;}
+
   /* ---------- modals ---------- */
   .overlay{
     position:fixed;inset:0;background:rgba(8,11,15,.44);z-index:60;
@@ -1279,6 +1285,68 @@ function slideOutAndDelete(el,layer,key,id){
   layer.classList.add("full"); layer.style.setProperty("--rw",(w+20)+"px");
   setTimeout(()=>{ closeSwipe(true); deleteTask(key,id); },200);
 }
+// ---------- touch: press-and-hold to reorder ----------
+// hold: the row lifts; release without moving = action sheet; move = drag (page edges auto-scroll)
+let touchHold=false, drag=null;    // drag: {el,key,t,ghost,offY,startTop,lastX,lastY,raf,list,idx}
+// while a row is held the page must not scroll; touchmove stays cancelable until scrolling starts
+board.addEventListener("touchmove",e=>{ if(touchHold && e.cancelable) e.preventDefault(); },{passive:false});
+function startDrag(el,key,t,x,y){
+  const r=el.getBoundingClientRect();
+  const ghost=el.cloneNode(true);
+  ghost.classList.remove("lifted","dragging");
+  ghost.classList.add("drag-ghost");
+  ghost.style.left=r.left+"px"; ghost.style.top=r.top+"px"; ghost.style.width=r.width+"px";
+  document.body.appendChild(ghost);
+  el.classList.remove("lifted"); el.classList.add("dragging");
+  drag={el,key,t,ghost,offY:y-r.top,startTop:r.top,lastX:x,lastY:y,raf:0,list:null,idx:-1};
+  moveDrag(x,y);
+  drag.raf=requestAnimationFrame(dragAutoScroll);
+}
+function moveDrag(x,y){
+  if(!drag) return;
+  drag.lastX=x; drag.lastY=y;
+  drag.ghost.style.transform=`translateY(${y-drag.offY-drag.startTop}px) scale(1.02)`;
+  dragTarget();
+}
+// drop line in the list under the finger (lists of visible days only)
+function dragTarget(){
+  const under=document.elementFromPoint(drag.lastX,drag.lastY);
+  const list=under && under.closest ? under.closest(".tasks") : null;
+  if(list && list.offsetParent!==null) drag.list=list;
+  if(!drag.list) return;
+  document.querySelectorAll(".tasks.drag-target").forEach(l=>{ if(l!==drag.list) l.classList.remove("drag-target"); });
+  drag.list.classList.add("drag-target");
+  const items=[...drag.list.querySelectorAll(".task:not(.dragging)")];
+  drag.idx=dropIndex(drag.list,drag.lastY);
+  let line=document.querySelector(".drop-line");
+  if(!line){ line=document.createElement("div"); line.className="drop-line"; }
+  if(drag.idx>=items.length) drag.list.appendChild(line);
+  else if(line.nextSibling!==items[drag.idx]) drag.list.insertBefore(line,items[drag.idx]);
+}
+function dragAutoScroll(){
+  if(!drag) return;
+  const top=document.querySelector("header").getBoundingClientRect().bottom+50, bottom=innerHeight-60;
+  let v=0;
+  if(drag.lastY<top) v=-Math.min(16,(top-drag.lastY)/4+2);
+  else if(drag.lastY>bottom) v=Math.min(16,(drag.lastY-bottom)/4+2);
+  if(v){ window.scrollBy(0,v); lastScrollTs=Date.now(); dragTarget(); }
+  drag.raf=requestAnimationFrame(dragAutoScroll);
+}
+function endDrag(cancel){
+  const d=drag; drag=null;
+  cancelAnimationFrame(d.raf);
+  d.ghost.remove();
+  d.el.classList.remove("dragging");
+  clearIndicators();
+  if(cancel || !d.list || d.idx<0) return;
+  const targetKey=d.list.closest(".day").dataset.key;
+  const src=store[d.key]||[], pos=src.findIndex(x=>x.id===d.t.id);
+  if(pos<0) return;
+  const [item]=src.splice(pos,1);
+  getDay(targetKey).splice(d.idx,0,item);
+  save(); render();
+}
+
 function attachSwipe(el,key,t){
   let sx=0, sy=0, base=0, dx=0, mode=null, pid=null, lp=null, layer=null, width=0;
   el.addEventListener("pointerdown",e=>{
@@ -1289,15 +1357,20 @@ function attachSwipe(el,key,t){
     clearTimeout(lp);
     lp=setTimeout(()=>{
       if(mode!=="pending") return;
-      mode="longpress";
+      mode="lifted"; touchHold=true;
       suppressClickUntil=Date.now()+700;
       if(navigator.vibrate) navigator.vibrate(12);
       closeSwipe(true);
-      openCtx(sx,sy,key,t,true);
-    },480);
+      el.classList.add("lifted");
+    },450);
   });
   el.addEventListener("pointermove",e=>{
     if(e.pointerId!==pid || !mode) return;
+    if(mode==="lifted"){
+      if(Math.abs(e.clientX-sx)>8 || Math.abs(e.clientY-sy)>8){ mode="drag"; startDrag(el,key,t,e.clientX,e.clientY); }
+      return;
+    }
+    if(mode==="drag"){ moveDrag(e.clientX,e.clientY); return; }
     if(mode==="pending"){
       const mx=e.clientX-sx, my=e.clientY-sy;
       if(Math.abs(mx)>10 && Math.abs(mx)>Math.abs(my)*1.2){
@@ -1317,10 +1390,16 @@ function attachSwipe(el,key,t){
   const end=e=>{
     if(e.pointerId!==pid) return;
     clearTimeout(lp);
-    const wasPending=mode==="pending";
-    if(mode==="swipe"){
+    touchHold=false;
+    const wasPending=mode==="pending", cancel=e.type==="pointercancel";
+    if(mode==="lifted"){                       // held but not moved: open the action sheet
+      el.classList.remove("lifted");
+      if(!cancel){ suppressClickUntil=Date.now()+500; openCtx(sx,sy,key,t,true); }
+    }else if(mode==="drag"){
+      suppressClickUntil=Date.now()+400;
+      endDrag(cancel);
+    }else if(mode==="swipe"){
       suppressClickUntil=Date.now()+350;
-      const cancel=e.type==="pointercancel";
       if(!cancel && -dx>width*0.55) slideOutAndDelete(el,layer,key,t.id);
       else if(!cancel && dx>width*0.45){ closeSwipe(); setTimeout(()=>setDone(key,t,!t.done),160); }
       else if(!cancel && -dx>SW_RIGHT_OPEN*0.45) snapTo(el,layer,-SW_RIGHT_OPEN);
