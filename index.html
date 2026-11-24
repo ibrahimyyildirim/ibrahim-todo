@@ -423,22 +423,29 @@
   /* ---------- swipe actions on task rows (touch) ---------- */
   .task{touch-action:pan-y;}
   .task.swiping,.task.swipe-open{background:var(--card);z-index:1;animation:none;}
-  .task.snap{transition:transform .24s cubic-bezier(.2,.8,.2,1), background .12s ease;}
-  .swipe-layer{position:absolute;z-index:0;border-radius:12px;overflow:hidden;}
-  .swipe-layer .sl-left,.swipe-layer .sl-right{position:absolute;top:0;bottom:0;display:flex;opacity:0;}
-  .swipe-layer .sl-left{left:0;width:var(--lw,76px);}
-  .swipe-layer .sl-right{right:0;width:var(--rw,144px);}
-  .swipe-layer.show-l .sl-left,.swipe-layer.show-r .sl-right{opacity:1;}
+  .task.swiping{transition:none;will-change:transform;}
+  .task.snap{transition:transform .3s cubic-bezier(.2,.9,.25,1);}
+  /* action buttons live only in the gap the row uncovers: nothing coloured sits behind the row */
+  .swipe-layer{position:absolute;z-index:0;pointer-events:none;}
+  .swipe-layer .sl-left,.swipe-layer .sl-right{position:absolute;top:0;bottom:0;display:flex;
+    overflow:hidden;pointer-events:auto;}
+  .swipe-layer .sl-left{left:0;width:var(--lw,0px);justify-content:flex-start;}
+  .swipe-layer .sl-right{right:0;width:var(--rw,0px);justify-content:flex-end;}
   .sl-btn{border:none;color:#fff;font-family:inherit;font-size:11px;font-weight:650;letter-spacing:.01em;
-    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;border-radius:12px;
     flex:0 0 72px;min-width:72px;padding:0 4px;cursor:pointer;overflow:hidden;white-space:nowrap;
-    transition:flex-basis .18s ease, min-width .18s ease, opacity .18s ease;}
+    transition:flex-basis .2s ease, min-width .2s ease, margin .2s ease, opacity .2s ease;}
   .sl-btn svg{width:19px;height:19px;flex:0 0 auto;}
-  .sl-done{background:var(--accent);flex:1 1 76px;}
-  .sl-later{background:var(--p-yellow);}
+  .sl-done{background:var(--accent);flex:1 1 76px;min-width:76px;}
+  .sl-later{background:var(--p-yellow);margin-right:4px;}
   .sl-del{background:var(--p-red);flex:1 1 72px;}
-  .swipe-layer.full .sl-later{flex-basis:0;min-width:0;opacity:0;padding:0;}
+  .swipe-layer.full .sl-later{flex-basis:0;min-width:0;opacity:0;padding:0;margin-right:0;}
   body.dark .sl-btn{color:#161B18;}
+  /* touch drag: drop marker floats over the list (no layout shift); whole day cards accept drops */
+  .drop-mark{position:absolute;left:10px;right:10px;height:3px;margin-top:-1.5px;border-radius:2px;
+    background:var(--accent);pointer-events:none;z-index:3;}
+  .day.drop-day{box-shadow:0 0 0 2px var(--accent), var(--shadow-md);opacity:1 !important;}
+  .swipe-layer.snap .sl-left,.swipe-layer.snap .sl-right{transition:width .3s cubic-bezier(.2,.9,.25,1);}
 
   /* press-and-hold: the row lifts; moving the finger drags it to a new place */
   .task.lifted{transform:scale(1.02);box-shadow:var(--shadow-lg);background:var(--card);z-index:2;
@@ -584,7 +591,8 @@
     .add-input,.sync-input{font-size:16px;}   /* prevents iOS focus zoom */
     .time-row input[type=time]{font-size:16px;}
     html{overscroll-behavior-y:none;}         /* no rubber-band bounce: steadier scrolling */
-    header{-webkit-user-select:none;user-select:none;}
+    header{-webkit-user-select:none;user-select:none;
+      background:var(--card);backdrop-filter:none;-webkit-backdrop-filter:none;}   /* opaque: nothing shows through while scrolling */
     .day-head{padding:12px 14px 10px;}
     .tasks{padding:5px 6px;}
     .day.empty-day .tasks{display:none;}      /* empty days stay compact: header + add row */
@@ -615,6 +623,19 @@
     .flag svg{width:18px;height:18px;}
     .alarm-badge{font-size:11.5px;padding:3px 9px;}
     .day.weekend.empty-day{opacity:.55;}
+    /* iOS keeps :hover after a tap; drop hover looks on touch so nothing stays lit or tinted */
+    .task:hover{background:transparent;}
+    .check:hover{border-color:color-mix(in srgb, var(--ink-soft) 75%, transparent);}
+    .check:checked:hover{border-color:var(--accent);}
+    .flag:hover{transform:none;}
+    .alarm-badge:hover{filter:none;}
+    .add-btn:hover,body.dark .add-btn:hover{background:var(--accent-soft);color:var(--accent);}
+    .btn:hover{background:var(--field);color:var(--ink-2);}
+    .btn.ghost:hover{background:transparent;color:var(--ink-soft);}
+    .today-btn:hover,body.dark .today-btn:hover{background:var(--accent-soft);color:var(--accent);}
+    .sync-btn.ok:hover{color:var(--accent);}
+    .sync-btn.err:hover{color:var(--p-red);}
+    .task.blurred:hover .ttext{filter:blur(5px);}
     .task.blurred.reveal .ttext{filter:blur(0);}
     .task{-webkit-touch-callout:none;}   /* long-press opens our menu, not the iOS callout */
     .task .ttext:not([contenteditable="true"]){-webkit-user-select:none;user-select:none;}
@@ -1062,8 +1083,9 @@ function taskEl(key,t){
 
 // ---------- drag & drop ----------
 function clearIndicators(){
-  document.querySelectorAll(".drop-line").forEach(l=>l.remove());
+  document.querySelectorAll(".drop-line,.drop-mark").forEach(l=>l.remove());
   document.querySelectorAll(".tasks.drag-target").forEach(l=>l.classList.remove("drag-target"));
+  document.querySelectorAll(".day.drop-day").forEach(d=>d.classList.remove("drop-day"));
 }
 function dropIndex(list,y){
   const items=[...list.querySelectorAll(".task:not(.dragging)")];
@@ -1218,7 +1240,7 @@ function postponeTask(key,id){
 
 // ---------- touch: swipe actions on rows ----------
 // swipe left: Ertele + Sil (pull all the way = delete); swipe right: Tamamla. Long-press: action sheet.
-const SW_RIGHT_OPEN=144, SW_LEFT_OPEN=76;
+const SW_RIGHT_OPEN=152, SW_LEFT_OPEN=80, SW_GAP=4;   // open widths incl. the 4px gap next to the row
 let openSwipe=null;                 // {el, layer, offset}
 let touchActive=false, lastScrollTs=0, suppressClickUntil=0;
 window.addEventListener("scroll",()=>{ lastScrollTs=Date.now(); if(openSwipe) closeSwipe(); },{passive:true});
@@ -1256,16 +1278,17 @@ function ensureLayer(el,key,t){
   return layer;
 }
 function setSwipe(el,layer,dx,width){
-  el.style.transform=dx ? `translateX(${dx}px)` : "";
-  layer.style.setProperty("--lw",Math.max(SW_LEFT_OPEN,dx)+"px");
-  layer.style.setProperty("--rw",Math.max(SW_RIGHT_OPEN,-dx)+"px");
+  el.style.transform=dx ? `translate3d(${dx}px,0,0)` : "";
+  // the buttons only fill the gap the row uncovers, so no colour can show around the row
+  layer.style.setProperty("--lw",Math.min(width,Math.max(0,dx-SW_GAP))+"px");
+  layer.style.setProperty("--rw",Math.min(width,Math.max(0,-dx-SW_GAP))+"px");
   const fullL=-dx>width*0.55;
   if(fullL!==layer.classList.contains("full")){ layer.classList.toggle("full",fullL); if(navigator.vibrate) navigator.vibrate(8); }
-  layer.classList.toggle("show-l",dx>0); layer.classList.toggle("show-r",dx<0);
   if(openSwipe && openSwipe.el===el) openSwipe.offset=dx;
 }
+// row and buttons animate together on the same curve
 function snapTo(el,layer,x){
-  el.classList.remove("swiping"); el.classList.add("snap","swipe-open");
+  el.classList.remove("swiping"); el.classList.add("snap","swipe-open"); layer.classList.add("snap");
   setSwipe(el,layer,x,el.offsetWidth);
 }
 function closeSwipe(instant){
@@ -1276,20 +1299,22 @@ function closeSwipe(instant){
     layer.remove(); el.style.transform=""; el.classList.remove("swiping","swipe-open","snap");
     return;
   }
-  el.classList.add("snap"); el.style.transform="";
-  setTimeout(()=>{ layer.remove(); el.classList.remove("swiping","swipe-open","snap"); },240);
+  el.classList.remove("swiping"); el.classList.add("snap"); layer.classList.add("snap");
+  setSwipe(el,layer,0,el.offsetWidth);
+  setTimeout(()=>{ layer.remove(); el.classList.remove("swipe-open","snap"); },320);
 }
 function slideOutAndDelete(el,layer,key,id){
   const w=el.offsetWidth;
-  el.classList.add("snap"); el.style.transform=`translateX(${-w-20}px)`;
-  layer.classList.add("full"); layer.style.setProperty("--rw",(w+20)+"px");
-  setTimeout(()=>{ closeSwipe(true); deleteTask(key,id); },200);
+  el.classList.add("snap"); layer.classList.add("snap","full");
+  setSwipe(el,layer,-w-SW_GAP,w);
+  setTimeout(()=>{ closeSwipe(true); deleteTask(key,id); },230);
 }
 // ---------- touch: press-and-hold to reorder ----------
-// hold: the row lifts; release without moving = action sheet; move = drag (page edges auto-scroll)
-let touchHold=false, drag=null;    // drag: {el,key,t,ghost,offY,startTop,lastX,lastY,raf,list,idx}
-// while a row is held the page must not scroll; touchmove stays cancelable until scrolling starts
-board.addEventListener("touchmove",e=>{ if(touchHold && e.cancelable) e.preventDefault(); },{passive:false});
+// hold: the row lifts; release without moving = action sheet; move = drag (page edges auto-scroll).
+// Drop between rows of a day, or anywhere on a day card (header, add row, empty day) to move it there.
+let touchHold=false, touchLock=false, drag=null;
+// while a row is held or swiped sideways the page must not scroll (touchmove is cancelable until scrolling starts)
+board.addEventListener("touchmove",e=>{ if((touchHold||touchLock) && e.cancelable) e.preventDefault(); },{passive:false});
 function startDrag(el,key,t,x,y){
   const r=el.getBoundingClientRect();
   const ghost=el.cloneNode(true);
@@ -1298,38 +1323,55 @@ function startDrag(el,key,t,x,y){
   ghost.style.left=r.left+"px"; ghost.style.top=r.top+"px"; ghost.style.width=r.width+"px";
   document.body.appendChild(ghost);
   el.classList.remove("lifted"); el.classList.add("dragging");
-  drag={el,key,t,ghost,offY:y-r.top,startTop:r.top,lastX:x,lastY:y,raf:0,list:null,idx:-1};
+  drag={el,key,t,ghost,offY:y-r.top,startTop:r.top,lastX:x,lastY:y,raf:0,tgt:null,inList:false,day:null,idx:-1};
   moveDrag(x,y);
   drag.raf=requestAnimationFrame(dragAutoScroll);
 }
 function moveDrag(x,y){
   if(!drag) return;
   drag.lastX=x; drag.lastY=y;
-  drag.ghost.style.transform=`translateY(${y-drag.offY-drag.startTop}px) scale(1.02)`;
+  drag.ghost.style.transform=`translate3d(0,${y-drag.offY-drag.startTop}px,0) scale(1.02)`;
   dragTarget();
 }
-// drop line in the list under the finger (lists of visible days only)
 function dragTarget(){
   const under=document.elementFromPoint(drag.lastX,drag.lastY);
-  const list=under && under.closest ? under.closest(".tasks") : null;
-  if(list && list.offsetParent!==null) drag.list=list;
-  if(!drag.list) return;
-  document.querySelectorAll(".tasks.drag-target").forEach(l=>{ if(l!==drag.list) l.classList.remove("drag-target"); });
-  drag.list.classList.add("drag-target");
-  const items=[...drag.list.querySelectorAll(".task:not(.dragging)")];
-  drag.idx=dropIndex(drag.list,drag.lastY);
-  let line=document.querySelector(".drop-line");
-  if(!line){ line=document.createElement("div"); line.className="drop-line"; }
-  if(drag.idx>=items.length) drag.list.appendChild(line);
-  else if(line.nextSibling!==items[drag.idx]) drag.list.insertBefore(line,items[drag.idx]);
+  const day=under && under.closest ? under.closest(".day") : null;
+  if(!day) return;                                   // over a gap between cards: keep the last target
+  const list=day.querySelector(".tasks");
+  const inList=!!(list && list.offsetParent!==null && list.contains(under));
+  const tgt=inList ? list : day;
+  if(drag.tgt!==tgt){
+    if(drag.tgt) drag.tgt.classList.remove("drag-target","drop-day");
+    tgt.classList.add(inList ? "drag-target" : "drop-day");
+    drag.tgt=tgt; drag.inList=inList;
+  }
+  drag.day=day;
+  let mark=document.querySelector(".drop-mark");
+  if(!inList){ if(mark) mark.remove(); drag.idx=-1; return; }
+  const items=[...list.querySelectorAll(".task:not(.dragging)")];
+  drag.idx=dropIndex(list,drag.lastY);
+  // the marker floats between rows (absolute), so nothing in the list shifts while dragging
+  let top;
+  if(!items.length) top=list.clientHeight/2;
+  else if(drag.idx<items.length) top=items[drag.idx].offsetTop-1;
+  else{ const last=items[items.length-1]; top=last.offsetTop+last.offsetHeight+1; }
+  if(!mark){ mark=document.createElement("div"); mark.className="drop-mark"; }
+  if(mark.parentNode!==list) list.appendChild(mark);
+  mark.style.top=top+"px";
 }
+// near the top/bottom edge the page scrolls, faster the closer the finger is
 function dragAutoScroll(){
   if(!drag) return;
-  const top=document.querySelector("header").getBoundingClientRect().bottom+50, bottom=innerHeight-60;
+  const zone=80, top=document.querySelector("header").getBoundingClientRect().bottom;
+  const dTop=top+zone-drag.lastY, dBot=drag.lastY-(innerHeight-zone);
   let v=0;
-  if(drag.lastY<top) v=-Math.min(16,(top-drag.lastY)/4+2);
-  else if(drag.lastY>bottom) v=Math.min(16,(drag.lastY-bottom)/4+2);
-  if(v){ window.scrollBy(0,v); lastScrollTs=Date.now(); dragTarget(); }
+  if(dTop>0) v=-18*Math.min(1,Math.pow(dTop/zone,1.5));
+  else if(dBot>0) v=18*Math.min(1,Math.pow(dBot/zone,1.5));
+  if(v){
+    const before=window.scrollY;
+    window.scrollBy(0,v);
+    if(window.scrollY!==before){ lastScrollTs=Date.now(); dragTarget(); }
+  }
   drag.raf=requestAnimationFrame(dragAutoScroll);
 }
 function endDrag(cancel){
@@ -1337,22 +1379,30 @@ function endDrag(cancel){
   cancelAnimationFrame(d.raf);
   d.ghost.remove();
   d.el.classList.remove("dragging");
-  clearIndicators();
-  if(cancel || !d.list || d.idx<0) return;
-  const targetKey=d.list.closest(".day").dataset.key;
+  if(d.tgt) d.tgt.classList.remove("drag-target","drop-day");
+  const mark=document.querySelector(".drop-mark"); if(mark) mark.remove();
+  if(cancel || !d.day) return;
+  const targetKey=d.day.dataset.key;
+  const anchorTop=d.day.getBoundingClientRect().top;
   const src=store[d.key]||[], pos=src.findIndex(x=>x.id===d.t.id);
   if(pos<0) return;
   const [item]=src.splice(pos,1);
-  getDay(targetKey).splice(d.idx,0,item);
+  const dest=getDay(targetKey);
+  if(d.inList && d.idx>=0) dest.splice(Math.min(d.idx,dest.length),0,item);
+  else if(item.done) dest.push(item);
+  else{ let i=dest.findIndex(x=>x.done); if(i<0) i=dest.length; dest.splice(i,0,item); }
   save(); render();
+  // the target day stays exactly where it was (a day above may have just got one row shorter)
+  const nd=board.querySelector(`.day[data-key="${targetKey}"]`);
+  if(nd){ const dy=nd.getBoundingClientRect().top-anchorTop; if(Math.abs(dy)>=1) window.scrollBy(0,dy); }
 }
 
 function attachSwipe(el,key,t){
-  let sx=0, sy=0, base=0, dx=0, mode=null, pid=null, lp=null, layer=null, width=0;
+  let sx=0, sy=0, base=0, dx=0, mode=null, pid=null, lp=null, layer=null, width=0, samples=[];
   el.addEventListener("pointerdown",e=>{
     if(e.pointerType!=="touch" || !e.isPrimary) return;
     if(el.querySelector('.ttext[contenteditable="true"]')) return;     // typing: leave the row alone
-    sx=e.clientX; sy=e.clientY; dx=0; mode="pending"; pid=e.pointerId;
+    sx=e.clientX; sy=e.clientY; dx=0; mode="pending"; pid=e.pointerId; samples=[];
     base=openSwipe && openSwipe.el===el ? openSwipe.offset : 0;
     clearTimeout(lp);
     lp=setTimeout(()=>{
@@ -1362,7 +1412,7 @@ function attachSwipe(el,key,t){
       if(navigator.vibrate) navigator.vibrate(12);
       closeSwipe(true);
       el.classList.add("lifted");
-    },450);
+    },500);
   });
   el.addEventListener("pointermove",e=>{
     if(e.pointerId!==pid || !mode) return;
@@ -1372,25 +1422,33 @@ function attachSwipe(el,key,t){
     }
     if(mode==="drag"){ moveDrag(e.clientX,e.clientY); return; }
     if(mode==="pending"){
-      const mx=e.clientX-sx, my=e.clientY-sy;
-      if(Math.abs(mx)>10 && Math.abs(mx)>Math.abs(my)*1.2){
-        mode="swipe"; clearTimeout(lp);
-        try{ el.setPointerCapture(pid); }catch(_){}
-        width=el.offsetWidth;
-        layer=ensureLayer(el,key,t);
-        el.classList.remove("snap"); el.classList.add("swiping");
-        sx=e.clientX;                                   // continue from here, no jump
-      }else if(Math.abs(my)>10){ mode=null; clearTimeout(lp); return; }
-      else return;
+      const ax=Math.abs(e.clientX-sx), ay=Math.abs(e.clientY-sy);
+      if(ax<10 && ay<10) return;                       // direction not decided yet
+      clearTimeout(lp);
+      if(ax<=ay*1.5){ mode=null; return; }              // mostly vertical: it's a page scroll
+      mode="swipe"; touchLock=true;                     // sideways: lock it, the page stays put
+      try{ el.setPointerCapture(pid); }catch(_){}
+      width=el.offsetWidth;
+      layer=ensureLayer(el,key,t);
+      el.classList.remove("snap"); layer.classList.remove("snap"); el.classList.add("swiping");
+      sx=e.clientX;                                     // continue from here, no jump
     }
     if(mode!=="swipe") return;
     dx=Math.max(-width*0.92,Math.min(width*0.9,base+(e.clientX-sx)));
     setSwipe(el,layer,dx,width);
+    samples.push({x:e.clientX,t:e.timeStamp});
+    if(samples.length>8) samples.shift();
   });
+  // finger speed over the last ~100 ms (px/ms): a quick flick decides even on a short swipe
+  const speed=()=>{
+    if(samples.length<2) return 0;
+    const last=samples[samples.length-1], first=samples.find(s=>last.t-s.t<=100) || samples[0];
+    return last.t>first.t ? (last.x-first.x)/(last.t-first.t) : 0;
+  };
   const end=e=>{
     if(e.pointerId!==pid) return;
     clearTimeout(lp);
-    touchHold=false;
+    touchHold=false; touchLock=false;
     const wasPending=mode==="pending", cancel=e.type==="pointercancel";
     if(mode==="lifted"){                       // held but not moved: open the action sheet
       el.classList.remove("lifted");
@@ -1400,10 +1458,12 @@ function attachSwipe(el,key,t){
       endDrag(cancel);
     }else if(mode==="swipe"){
       suppressClickUntil=Date.now()+350;
-      if(!cancel && -dx>width*0.55) slideOutAndDelete(el,layer,key,t.id);
-      else if(!cancel && dx>width*0.45){ closeSwipe(); setTimeout(()=>setDone(key,t,!t.done),160); }
-      else if(!cancel && -dx>SW_RIGHT_OPEN*0.45) snapTo(el,layer,-SW_RIGHT_OPEN);
-      else if(!cancel && dx>SW_LEFT_OPEN*0.55) snapTo(el,layer,SW_LEFT_OPEN);
+      const v=speed();
+      if(cancel) closeSwipe();
+      else if(-dx>width*0.55) slideOutAndDelete(el,layer,key,t.id);
+      else if(dx>width*0.45){ closeSwipe(); setTimeout(()=>setDone(key,t,!t.done),160); }
+      else if(dx<0 && (v<-0.3 || (v<=0.3 && -dx>SW_RIGHT_OPEN*0.4))) snapTo(el,layer,-SW_RIGHT_OPEN);
+      else if(dx>0 && (v>0.3 || (v>=-0.3 && dx>SW_LEFT_OPEN*0.5))) snapTo(el,layer,SW_LEFT_OPEN);
       else closeSwipe();
     }else if(wasPending && openSwipe && openSwipe.el===el){
       closeSwipe(); suppressClickUntil=Date.now()+350;   // tap on an open row just closes it
@@ -1434,7 +1494,7 @@ function swipeHintOnce(){
     const k=el.closest(".day").dataset.key, t=(store[k]||[]).find(x=>x.id===el.dataset.id);
     if(!t) return;
     const layer=ensureLayer(el,k,t);
-    el.classList.add("swiping","snap");
+    el.classList.add("snap","swipe-open"); layer.classList.add("snap");
     setSwipe(el,layer,-SW_RIGHT_OPEN*0.7,el.offsetWidth);
     setTimeout(()=>closeSwipe(),1000);
   },900);
