@@ -857,7 +857,7 @@ const MKEY = KEY + "-syncmeta";    // {snap, fields, dead, dirty}
 const SYNC_FIELDS = ["day","ord","text","done","priority","blurred","alarm","alarmFired"];
 function loadJson(k, def){ try{ const v = JSON.parse(localStorage.getItem(k)); return v == null ? def : v; }catch(e){ return def; } }
 let syncCfg = loadJson(SKEY, null), syncMeta = loadJson(MKEY, null);
-let syncState = "off", syncErr = "", lastSyncAt = 0, pushTimer = null, syncBusy = false, syncAgain = false, remoteEtag = null;
+let syncState = "off", syncErr = "", lastSyncAt = 0, lastCheckAt = 0, pushTimer = null, syncBusy = false, syncAgain = false, idleWait = null;
 let store = load();
 function load(){ try{ return JSON.parse(localStorage.getItem(KEY)) || {}; }catch(e){ return {}; } }
 function save(){
@@ -1242,14 +1242,15 @@ function postponeTask(key,id){
 // swipe left: Ertele + Sil (pull all the way = delete); swipe right: Tamamla. Long-press: action sheet.
 const SW_RIGHT_OPEN=152, SW_LEFT_OPEN=80, SW_GAP=4;   // open widths incl. the 4px gap next to the row
 let openSwipe=null;                 // {el, layer, offset}
-let touchActive=false, lastScrollTs=0, suppressClickUntil=0;
+let touchActive=false, lastPointerTs=0, lastScrollTs=0, suppressClickUntil=0;
+document.addEventListener("pointermove",e=>{ if(e.pointerType==="touch") lastPointerTs=Date.now(); },{passive:true,capture:true});
 window.addEventListener("scroll",()=>{ lastScrollTs=Date.now(); if(openSwipe) closeSwipe(); },{passive:true});
 // a tap that only closes an open row (or ends a swipe/long-press) must not also hit what's under it
 document.addEventListener("click",e=>{
   if(Date.now()<suppressClickUntil){ e.stopPropagation(); e.preventDefault(); }
 },true);
 document.addEventListener("pointerdown",e=>{
-  if(e.pointerType==="touch") touchActive=true;
+  if(e.pointerType==="touch"){ touchActive=true; lastPointerTs=Date.now(); }
   if(openSwipe && !openSwipe.el.contains(e.target) && !openSwipe.layer.contains(e.target)){
     closeSwipe(); suppressClickUntil=Date.now()+400;
   }
@@ -2005,7 +2006,9 @@ setInterval(dayWatch,1000);
 // ---------- cloud sync: a private GitHub repo shared by all devices ----------
 // Notes stay in localStorage; when connected, changes are merged into todo.json in a
 // private repo. Merge = newest change wins per field; deletions are kept as tombstones.
-const SYNC_OWNER = "ibrahimyyildirim", SYNC_REPO = "ibrahim-todo-data", SYNC_PATH = "todo.json";
+const SYNC_OWNER = "ibrahimyyildirim", SYNC_REPO = "ibrahim-todo-data";
+// automated tests point this at a separate file so they never touch the real notes
+const SYNC_PATH = (()=>{ try{ return localStorage.getItem(KEY + "-syncfile") || "todo.json"; }catch(e){ return "todo.json"; } })();
 const SYNC_API = "https://api.github.com";
 const TOKEN_URL = "https://github.com/settings/personal-access-tokens/new?name=%C4%B0brahim+ToDo+sync"
   + "&description=ibrahim-todo-data+okuma+yazma&target_name=" + SYNC_OWNER + "&expires_in=none&contents=write";
@@ -2121,14 +2124,20 @@ function renderKeepFocus(){
   render();
   if(key){ const c = board.querySelector(`.day[data-key="${key}"] .add-input`); if(c) c.focus(); }
 }
-// don't swap the board out from under the user while they type, drag or use a dialog
-function userBusy(){
+// never swap the board out while the user types, moves a row or has a dialog open
+function hardBusy(){
   const a = document.activeElement;
   const inSync = a && a.closest && a.closest("#syncOverlay");
   if(a && !inSync && (a.isContentEditable || (a.tagName === "INPUT" && a.type !== "checkbox" && a.value))) return true;
-  if(touchActive || openSwipe || Date.now() - lastScrollTs < 900) return true;   // finger down or still scrolling
-  return !!(document.querySelector(".overlay.open:not(#syncOverlay)") || ctx.style.display === "block" || dragInfo);
+  if(touchHold || touchLock || drag || openSwipe || dragInfo) return true;
+  return !!(document.querySelector(".overlay.open:not(#syncOverlay)") || ctx.style.display === "block");
 }
+// a finger on the glass right now or the page still scrolling: wait a moment before re-rendering.
+// The finger flag expires on its own (iOS can swallow the lift when you leave the app).
+function softBusy(){
+  return (touchActive && Date.now() - lastPointerTs < 1500) || Date.now() - lastScrollTs < 400;
+}
+function userBusy(){ return hardBusy() || softBusy(); }
 
 function b64ToUtf8(b64){
   const bin = atob(b64.replace(/\s/g,"")), bytes = new Uint8Array(bin.length);
@@ -2150,47 +2159,61 @@ function httpError(status, writing){
   if(status === 403) return new Error(writing ? "anahtarın yazma izni yok (Contents: Read and write olmalı)" : "anahtarın bu depoya izni yok");
   return new Error("GitHub yanıtı " + status);
 }
-async function fetchRemote(useEtag){
-  const r = await fetch(syncUrl() + "?ref=main",
-    {headers: syncHeaders(useEtag && remoteEtag ? {"If-None-Match": remoteEtag} : null), cache: "no-store"});
-  if(r.status === 304) return {unchanged: true};
+// always a fresh read: no conditional request, unique URL, no browser cache
+async function fetchRemote(){
+  const r = await fetch(syncUrl() + "?ref=main&_=" + Date.now(), {headers: syncHeaders(), cache: "no-store"});
   if(r.status === 404) return {doc: null, sha: null};
   if(!r.ok) throw httpError(r.status, false);
   const j = await r.json();
-  remoteEtag = r.headers.get("ETag");
   return {doc: JSON.parse(b64ToUtf8(j.content || "")), sha: j.sha};
 }
+function deviceName(){
+  const ua = navigator.userAgent;
+  return /iPhone|iPad|iPod/.test(ua) ? "iPhone" : /Android/.test(ua) ? "Android"
+    : /Windows/.test(ua) ? "Windows" : /Macintosh/.test(ua) ? "Mac" : "cihaz";
+}
 async function putRemote(doc, sha){
-  const body = {message: "sync " + new Date().toISOString(), content: utf8ToB64(JSON.stringify(doc)), branch: "main"};
+  const body = {message: `sync · ${deviceName()} · ${new Date().toISOString()}`,
+    content: utf8ToB64(JSON.stringify(doc)), branch: "main"};
   if(sha) body.sha = sha;
   const r = await fetch(syncUrl(), {method: "PUT", headers: syncHeaders({"Content-Type": "application/json"}),
     body: JSON.stringify(body)});
   if(r.status === 409 || r.status === 422) return false;   // another device wrote first
   if(!r.ok) throw httpError(r.status, true);
-  remoteEtag = null;
   return true;
 }
 
-async function syncNow(){
+// wait (locally, no network) until the user is idle, then sync once
+function syncWhenIdle(force){
+  if(idleWait) return;
+  idleWait = setInterval(()=>{
+    if(force ? hardBusy() : userBusy()) return;
+    clearInterval(idleWait); idleWait = null;
+    syncNow({force});
+  }, 400);
+}
+// force (manual, app back in front): only typing / moving a row / an open dialog may delay it
+async function syncNow(opts){
+  const force = !!(opts && opts.force);
   if(!syncCfg || !syncMeta) return;
   if(syncBusy){ syncAgain = true; return; }
   if(!navigator.onLine){ setSyncState("offline"); return; }
-  if(userBusy()){ schedulePush(3000); return; }
+  if(force ? hardBusy() : userBusy()){ syncWhenIdle(force); return; }
   syncBusy = true; setSyncState("busy");
   try{
     for(let attempt = 0; attempt < 4; attempt++){
       syncTrack(true);
-      const rem = await fetchRemote(!syncMeta.dirty);
-      if(rem.unchanged){ finishSync(); return; }        // nothing new on either side
+      const rem = await fetchRemote();
+      lastCheckAt = Date.now();
       const local = localDoc();
       const remote = rem.doc ? normDoc(rem.doc) : null;
       const merged = mergeDocs(local, remote || {v:1, tasks:{}, dead:{}});
       if(canon(merged) !== canon(local)){
-        if(userBusy()){ schedulePush(3000); setSyncState(lastSyncAt ? "ok" : "busy"); return; }
+        if(force ? hardBusy() : userBusy()){ syncWhenIdle(force); setSyncState(lastSyncAt ? "ok" : "busy"); return; }
         applyDoc(merged); renderKeepFocus();
       }
       if(!remote || canon(merged) !== canon(remote)){
-        if(!(await putRemote(merged, rem.sha))){ remoteEtag = null; continue; }   // re-read and merge again
+        if(!(await putRemote(merged, rem.sha))) continue;   // another device wrote first: re-read and merge
       }
       syncMeta.dirty = false; saveMeta();
       finishSync(); return;
@@ -2212,9 +2235,10 @@ function syncIcon(extra){
   return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"
     stroke-linejoin="round"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/>${extra || ""}</svg>`;
 }
+function hhmmss(ts){ const d = new Date(ts); return hhmm(ts) + ":" + pad(d.getSeconds()); }
 function syncLabel(){
   return {off: "Eşitleme kapalı: bağlanmak için tıkla", busy: "Eşitleniyor…",
-    ok: "Eşitlendi" + (lastSyncAt ? " · " + hhmm(lastSyncAt) : ""),
+    ok: "Eşitlendi" + (lastCheckAt ? " · son kontrol " + hhmmss(lastCheckAt) : ""),
     offline: "Çevrimdışı: bağlantı gelince eşitlenecek", err: "Eşitleme hatası: " + syncErr}[syncState];
 }
 function setSyncState(s){
@@ -2241,7 +2265,7 @@ document.getElementById("syncBtn").onclick = ()=>{
   document.getElementById("syncErrOff").textContent = "";
   renderSyncModal();
   syncOverlay.classList.add("open");
-  if(syncCfg) syncNow();
+  if(syncCfg) syncNow({force:true});
 };
 document.getElementById("syncConnect").onclick = async ()=>{
   const input = document.getElementById("syncToken"), errEl = document.getElementById("syncErrOff");
@@ -2267,22 +2291,31 @@ document.getElementById("syncConnect").onclick = async ()=>{
 };
 document.getElementById("syncDisconnect").onclick = ()=>{
   if(!confirm("Bu cihazda eşitleme kapatılsın mı? Notların bu cihazda kalır.")) return;
-  syncCfg = null; syncMeta = null; remoteEtag = null; lastSyncAt = 0;
+  syncCfg = null; syncMeta = null; lastSyncAt = 0; lastCheckAt = 0;
   localStorage.removeItem(SKEY); localStorage.removeItem(MKEY);
   setSyncState("off");
 };
-document.getElementById("syncNowBtn").onclick = ()=>syncNow();
+document.getElementById("syncNowBtn").onclick = ()=>syncNow({force:true});
 document.getElementById("syncClose").onclick = ()=>syncOverlay.classList.remove("open");
 document.getElementById("syncCancel").onclick = ()=>syncOverlay.classList.remove("open");
 syncOverlay.addEventListener("click", e=>{ if(e.target === syncOverlay) syncOverlay.classList.remove("open"); });
 
-// pull while the app is open and whenever it comes back to the foreground
-setInterval(()=>{ if(syncCfg && document.visibilityState === "visible") syncNow(); }, 20000);
-document.addEventListener("visibilitychange", ()=>{ if(syncCfg && document.visibilityState === "visible") syncNow(); });
-window.addEventListener("online", ()=>{ if(syncCfg) syncNow(); });
+// pull every 10 s while the app is open, and right away whenever it comes back to the front
+setInterval(()=>{ if(syncCfg && document.visibilityState === "visible") syncNow(); }, 10000);
+function resumeSync(){
+  touchActive = false; touchHold = false; touchLock = false;   // a gesture can't survive leaving the app
+  if(syncCfg && document.visibilityState === "visible") syncNow({force:true});
+}
+document.addEventListener("visibilitychange", ()=>{
+  if(document.visibilityState === "visible") resumeSync(); else touchActive = false;
+});
+window.addEventListener("pageshow", resumeSync);
+window.addEventListener("focus", resumeSync);
+window.addEventListener("online", ()=>{ if(syncCfg) syncNow({force:true}); });
 window.addEventListener("offline", ()=>{ if(syncCfg) setSyncState("offline"); });
 setSyncState(syncCfg ? "busy" : "off");
-window.__todoSync = {now: syncNow, status: ()=>({state: syncState, err: syncErr, last: lastSyncAt, busy: syncBusy})};
+window.__todoSync = {now: (o)=>syncNow(o), status: ()=>({state: syncState, err: syncErr, last: lastSyncAt,
+  check: lastCheckAt, busy: syncBusy})};
 
 // ---------- installable app: offline cache + persistent storage ----------
 if("serviceWorker" in navigator && (location.protocol==="https:" || location.hostname==="localhost")){
