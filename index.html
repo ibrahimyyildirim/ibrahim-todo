@@ -1843,10 +1843,10 @@ function fireAlarm(key,t){
 // same title, text and tag as the push service's notification, so when both arrive they merge into one
 function notifyAlarm(t){
   if(!("Notification" in window) || Notification.permission!=="granted") return;
-  const opts={body: t.blurred ? "Gizli bir notun alarm saati geldi" : t.text, tag:"alarm-"+t.id, icon:"icons/icon-192.png"};
-  const plain=()=>{ try{ new Notification("İbrahim ToDo",opts); }catch(e){} };
+  const title = t.blurred ? "Gizli not" : (t.text || "Hatırlatma"), opts={body:"", tag:"alarm-"+t.id, icon:"icons/icon-192.png"};
+  const plain=()=>{ try{ new Notification(title,opts); }catch(e){} };
   if(navigator.serviceWorker && navigator.serviceWorker.controller)
-    navigator.serviceWorker.ready.then(r=>r.showNotification("İbrahim ToDo",opts)).catch(plain);
+    navigator.serviceWorker.ready.then(r=>r.showNotification(title,opts)).catch(plain);
   else plain();
 }
 

@@ -101,15 +101,16 @@ export function dueAlarms(doc, from, to) {
     .filter(([, t]) => t && t.alarm && t.alarm > from && t.alarm <= to && !t.done)
     .map(([id, t]) => ({ id, text: t.text || "", blurred: !!t.blurred }));
 }
-// hidden (blurred) notes never show their text on the lock screen
+// iOS already prints "from İbrahim ToDo" under the title, so the title is the note itself (the name shows once).
+// Hidden (blurred) notes never show their text on the lock screen.
 export function notificationFor(alarm, appUrl) {
   const text = alarm.text.length > 300 ? alarm.text.slice(0, 300) + "…" : alarm.text;
-  return JSON.stringify({ title: "İbrahim ToDo", body: alarm.blurred ? "Gizli bir notun alarm saati geldi" : text,
+  return JSON.stringify({ title: alarm.blurred ? "Gizli not" : (text || "Hatırlatma"), body: "",
     tag: "alarm-" + alarm.id, url: appUrl });
 }
 export function testNotification(appUrl) {
-  return JSON.stringify({ title: "İbrahim ToDo",
-    body: "Test bildirimi: bildirimler çalışıyor, uygulama kapalıyken de alarmların gelecek.", tag: "test", url: appUrl });
+  return JSON.stringify({ title: "Test bildirimi",
+    body: "Bildirimler çalışıyor, uygulama kapalıyken de alarmların gelecek.", tag: "test", url: appUrl });
 }
 
 export async function runAlarms(env, at, fetchImpl = fetch) {

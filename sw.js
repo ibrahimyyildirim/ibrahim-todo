@@ -67,11 +67,12 @@ self.addEventListener("fetch", e => {
 
 // alarm notifications from the push service (push-worker/), also while the app is closed.
 // iOS requires every push to show a notification, so even an unreadable message shows one.
+// The title is the note itself: iOS adds "from İbrahim ToDo" on its own.
 self.addEventListener("push", e => {
   let d = {};
   try { d = e.data ? e.data.json() : {}; } catch (err) { d = { body: e.data ? e.data.text() : "" }; }
-  e.waitUntil(self.registration.showNotification(d.title || "İbrahim ToDo", {
-    body: d.body || "Alarm",
+  e.waitUntil(self.registration.showNotification(d.title || "Hatırlatma", {
+    body: d.body || "",
     tag: d.tag || "ibrahim-todo",
     icon: "./icons/icon-192.png",
     data: { url: d.url || "./" }
