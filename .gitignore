@@ -8,3 +8,7 @@
 !sw.js
 !icons/
 !icons/*.png
+# notification service source only; its private key (.vapid-private.json) and wrangler state stay local
+!push-worker/
+!push-worker/worker.js
+!push-worker/wrangler.toml

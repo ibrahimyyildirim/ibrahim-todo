@@ -64,3 +64,27 @@ self.addEventListener("fetch", e => {
     })
   );
 });
+
+// alarm notifications from the push service (push-worker/), also while the app is closed.
+// iOS requires every push to show a notification, so even an unreadable message shows one.
+self.addEventListener("push", e => {
+  let d = {};
+  try { d = e.data ? e.data.json() : {}; } catch (err) { d = { body: e.data ? e.data.text() : "" }; }
+  e.waitUntil(self.registration.showNotification(d.title || "İbrahim ToDo", {
+    body: d.body || "Alarm",
+    tag: d.tag || "ibrahim-todo",
+    icon: "./icons/icon-192.png",
+    data: { url: d.url || "./" }
+  }));
+});
+
+// tapping the notification brings the app to the front, or opens it
+self.addEventListener("notificationclick", e => {
+  e.notification.close();
+  const url = (e.notification.data && e.notification.data.url) || "./";
+  e.waitUntil((async () => {
+    const wins = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+    for (const w of wins) if ("focus" in w) return w.focus();
+    if (self.clients.openWindow) return self.clients.openWindow(url);
+  })());
+});

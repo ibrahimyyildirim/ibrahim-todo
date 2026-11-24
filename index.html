@@ -549,6 +549,18 @@
   .sync-status.err .dot{background:var(--p-red);}
   .sync-status.busy .dot{background:var(--p-yellow);}
   .sync-status.offline .dot{background:var(--ink-soft);}
+  /* alarm notifications (inside the sync dialog) */
+  .push-box{border-top:1px solid var(--hairline);margin-top:14px;padding-top:14px;}
+  .push-head{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:650;color:var(--ink);}
+  .push-head svg{width:15px;height:15px;color:var(--accent);flex:0 0 auto;}
+  .push-state{margin-left:auto;font-size:11.5px;font-weight:600;color:var(--ink-soft);}
+  .push-state.on{color:var(--accent);}
+  .push-box .sync-text{margin:6px 0 10px;}
+  .push-row{display:flex;gap:8px;flex-wrap:wrap;}
+  .push-row .btn:disabled{opacity:.55;cursor:default;transform:none;}
+  .push-msg{font-size:12px;color:var(--ink-2);margin-top:8px;line-height:1.5;}
+  .push-msg:empty{display:none;}
+  .push-msg.err{color:var(--p-red);}
 
   /* ---------- undo toast ---------- */
   #undoToast{
@@ -753,7 +765,19 @@
     <div id="syncOn">
       <div class="sync-status" id="syncStatus"></div>
       <div class="sync-text">Depo: <b>ibrahimyyildirim/ibrahim-todo-data</b>. Değişikliklerin birkaç saniyede gönderilir;
-        uygulama açıkken diğer cihazlardaki değişiklikler yaklaşık 20 saniyede gelir.</div>
+        uygulama açıkken diğer cihazlardaki değişiklikler yaklaşık 10 saniyede gelir.</div>
+      <div class="push-box" id="pushBox">
+        <div class="push-head"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+          stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="13" r="7.5"/><path d="M12 9.8V13l2.6 1.8"/>
+          <path d="M4.5 4.5L7.5 7M19.5 4.5L16.5 7"/></svg>Alarm bildirimleri<span class="push-state" id="pushState"></span></div>
+        <div class="sync-text" id="pushText"></div>
+        <div class="push-row">
+          <button class="btn primary" id="pushOnBtn">Bildirimleri aç</button>
+          <button class="btn" id="pushTestBtn">Test bildirimi gönder</button>
+          <button class="btn" id="pushOffBtn">Bildirimleri kapat</button>
+        </div>
+        <div class="push-msg" id="pushMsg"></div>
+      </div>
       <div class="mrow">
         <button class="btn" id="syncDisconnect" style="margin-right:auto">Bağlantıyı kes</button>
         <button class="btn" id="syncClose">Kapat</button>
@@ -1812,12 +1836,18 @@ function beep(){
 function fireAlarm(key,t){
   activeAlarms.add(t.id);   // blink until the row is clicked
   beep();
-  try{
-    if("Notification" in window && Notification.permission==="granted")
-      new Notification("İbrahim ToDo — Hatırlatma",{body:t.text});
-  }catch(e){}
+  notifyAlarm(t);
   const el=board.querySelector(`.day[data-key="${key}"] .task[data-id="${t.id}"]`);
   if(el) el.classList.add("alarming");
+}
+// same title, text and tag as the push service's notification, so when both arrive they merge into one
+function notifyAlarm(t){
+  if(!("Notification" in window) || Notification.permission!=="granted") return;
+  const opts={body: t.blurred ? "Gizli bir notun alarm saati geldi" : t.text, tag:"alarm-"+t.id, icon:"icons/icon-192.png"};
+  const plain=()=>{ try{ new Notification("İbrahim ToDo",opts); }catch(e){} };
+  if(navigator.serviceWorker && navigator.serviceWorker.controller)
+    navigator.serviceWorker.ready.then(r=>r.showNotification("İbrahim ToDo",opts)).catch(plain);
+  else plain();
 }
 
 function checkAlarms(){
@@ -2264,6 +2294,7 @@ document.getElementById("syncTokenLink").href = TOKEN_URL;
 document.getElementById("syncBtn").onclick = ()=>{
   document.getElementById("syncErrOff").textContent = "";
   renderSyncModal();
+  pushMsg = ""; pushRefresh();
   syncOverlay.classList.add("open");
   if(syncCfg) syncNow({force:true});
 };
@@ -2322,6 +2353,169 @@ if("serviceWorker" in navigator && (location.protocol==="https:" || location.hos
   navigator.serviceWorker.register("sw.js").catch(()=>{});
 }
 if(navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(()=>{});
+
+// ---------- alarm notifications while the app is closed (Web Push) ----------
+// This device puts its push address in push.json (same private repo, written with the sync key).
+// A small Cloudflare service (push-worker/) reads todo.json + push.json every minute and sends each
+// alarm to every registered device, so it arrives even when the app is closed.
+const PUSH_PUBLIC_KEY = "BDpu-XVH244_Gu-w2ZoWM-MBRjaLWVDmPnC2Z15Nhy1_O5mJbWD7Twhlb-68owZPlekJ23lfHZ1eLQ2lymCOGis";  // VAPID; the private half lives only in the service
+// automated tests point this at a separate file so they never touch the real registrations
+const PUSH_PATH = (()=>{ try{ return localStorage.getItem(KEY + "-pushfile") || "push.json"; }catch(e){ return "push.json"; } })();
+const PKEY = KEY + "-push";
+let pushReg = loadJson(PKEY, null);          // {id, endpoint}: this device's entry in push.json
+let pushSubOk = null, pushWorking = false, pushMsg = "", pushMsgErr = false;
+
+const isIos = ()=> /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+const isStandalone = ()=> matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+function pushSupported(){
+  return (location.protocol === "https:" || location.hostname === "localhost") &&
+    "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+}
+function swReady(){
+  return Promise.race([navigator.serviceWorker.ready, new Promise((_, rej)=>setTimeout(()=>
+    rej(new Error("uygulama dosyaları hazır değil, sayfayı yenileyip tekrar dene")), 10000))]);
+}
+function pushKeyBytes(){
+  const s = PUSH_PUBLIC_KEY.replace(/-/g,"+").replace(/_/g,"/"), bin = atob(s + "===".slice((s.length + 3) % 4));
+  return Uint8Array.from(bin, c=>c.charCodeAt(0));
+}
+function pushFileUrl(){ return `${SYNC_API}/repos/${SYNC_OWNER}/${SYNC_REPO}/contents/${PUSH_PATH}`; }
+// read-modify-write of push.json; if another device wrote first, read again and redo the change
+async function editPushFile(change){
+  for(let attempt = 0; attempt < 4; attempt++){
+    const r = await fetch(pushFileUrl() + "?ref=main&_=" + Date.now(), {headers: syncHeaders(), cache: "no-store"});
+    if(!r.ok && r.status !== 404) throw httpError(r.status, false);
+    let doc = null, sha = null;
+    if(r.ok){ const j = await r.json(); sha = j.sha; try{ doc = JSON.parse(b64ToUtf8(j.content || "")); }catch(e){} }
+    if(!doc || !Array.isArray(doc.subs)) doc = {v:1, subs:[]};
+    if(change(doc) === false) return doc;              // nothing to change
+    const body = {message: `push · ${deviceName()} · ${new Date().toISOString()}`,
+      content: utf8ToB64(JSON.stringify(doc, null, 1)), branch: "main"};
+    if(sha) body.sha = sha;
+    const w = await fetch(pushFileUrl(), {method: "PUT", headers: syncHeaders({"Content-Type": "application/json"}),
+      body: JSON.stringify(body)});
+    if(w.status === 409 || w.status === 422) continue;
+    if(!w.ok) throw httpError(w.status, true);
+    return doc;
+  }
+  throw new Error("başka cihazla çakışma, tekrar dene");
+}
+function sameServerKey(sub){
+  const k = sub.options && sub.options.applicationServerKey;
+  if(!k) return true;
+  const a = new Uint8Array(k), b = pushKeyBytes();
+  return a.length === b.length && a.every((x,i)=>x === b[i]);
+}
+async function pushSubscription(create){
+  const reg = await swReady();
+  let sub = await reg.pushManager.getSubscription();
+  if(sub && !sameServerKey(sub)){ await sub.unsubscribe(); sub = null; }
+  if(!sub && create) sub = await reg.pushManager.subscribe({userVisibleOnly: true, applicationServerKey: pushKeyBytes()});
+  return sub;
+}
+// one entry per device: re-registering replaces this device's old address
+async function pushSave(sub){
+  const j = sub.toJSON();
+  const id = (pushReg && pushReg.id) || (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
+  await editPushFile(doc=>{
+    const prev = doc.subs.find(s=>s.id === id);
+    doc.subs = doc.subs.filter(s=>s.id !== id && s.endpoint !== j.endpoint);
+    doc.subs.push({id, endpoint: j.endpoint, keys: j.keys, device: deviceName(), added: prev ? prev.added : Date.now()});
+  });
+  pushReg = {id, endpoint: j.endpoint}; pushSubOk = true;
+  localStorage.setItem(PKEY, JSON.stringify(pushReg));
+}
+function pushError(e){
+  const m = String(e && e.message || e);
+  if(e && e.name === "NotAllowedError") return "Bildirim izni verilmedi.";
+  if((e && e.name === "AbortError") || /push service/i.test(m)) return "Bildirim servisine kaydolunamadı, biraz sonra tekrar dene.";
+  if(!navigator.onLine) return "İnternet bağlantısı yok.";
+  return m;
+}
+function pushDeniedText(){
+  return isIos() ? "Bildirim izni kapalı. iPhone'da Ayarlar > Bildirimler > İbrahim ToDo bölümünden açabilirsin."
+    : "Bildirim izni kapalı. Tarayıcının site ayarlarından bu sayfaya bildirim izni ver.";
+}
+function pushSay(text, err){ pushMsg = text; pushMsgErr = !!err; renderPush(); }
+function renderPush(){
+  const st = document.getElementById("pushState"), tx = document.getElementById("pushText");
+  const onB = document.getElementById("pushOnBtn"), testB = document.getElementById("pushTestBtn"), offB = document.getElementById("pushOffBtn");
+  const ok = pushSupported(), perm = ok ? Notification.permission : "";
+  let state = "", text;
+  if(!ok) text = isIos() && !isStandalone()
+    ? "iPhone'da bildirim için bu sayfayı Safari'de Paylaş > Ana Ekrana Ekle ile ekle, sonra ana ekrandaki simgeden aç."
+    : "Bu tarayıcı, uygulama kapalıyken bildirim göstermeyi desteklemiyor.";
+  else if(perm === "denied"){ state = "izin yok"; text = pushDeniedText(); }
+  else if(pushReg && perm === "granted" && pushSubOk !== false){
+    state = "açık"; text = "Alarm saati gelince bu cihaza bildirim gelir, uygulama kapalı olsa da. Gizli notların metni bildirimde görünmez.";
+  }
+  else{ state = "kapalı"; text = "Açarsan alarm saati gelince bu cihaza bildirim gelir, uygulama kapalı olsa da."; }
+  const on = state === "açık";
+  st.textContent = state; st.className = "push-state" + (on ? " on" : "");
+  tx.textContent = text;
+  onB.style.display = ok && perm !== "denied" && !on ? "" : "none";
+  testB.style.display = offB.style.display = on ? "" : "none";
+  [onB, testB, offB].forEach(b=>{ b.disabled = pushWorking; });
+  const m = document.getElementById("pushMsg");
+  m.textContent = pushMsg; m.className = "push-msg" + (pushMsgErr ? " err" : "");
+}
+async function pushEnable(){
+  // the permission prompt has to come straight from the tap (iOS), before anything else is awaited
+  let perm = Notification.permission;
+  if(perm === "default") perm = await Notification.requestPermission();
+  if(perm !== "granted"){ pushSay(perm === "denied" ? pushDeniedText() : "Bildirim izni verilmedi.", true); return; }
+  pushWorking = true; pushSay("Açılıyor…");
+  try{
+    await pushSave(await pushSubscription(true));
+    pushSay("Bildirimler bu cihazda açık. Denemek için test bildirimi gönderebilirsin.");
+  }catch(e){ pushSay("Açılamadı: " + pushError(e), true); }
+  finally{ pushWorking = false; renderPush(); }
+}
+async function pushDisable(){
+  pushWorking = true; pushSay("Kapatılıyor…");
+  try{
+    const sub = await pushSubscription(false), id = pushReg && pushReg.id, ep = sub && sub.endpoint;
+    await editPushFile(doc=>{
+      const n = doc.subs.length;
+      doc.subs = doc.subs.filter(s=>s.id !== id && s.endpoint !== ep);
+      return doc.subs.length !== n;
+    });
+    if(sub) await sub.unsubscribe().catch(()=>{});
+    pushReg = null; pushSubOk = null; localStorage.removeItem(PKEY);
+    pushSay("Bildirimler bu cihazda kapatıldı.");
+  }catch(e){ pushSay("Kapatılamadı: " + pushError(e), true); }
+  finally{ pushWorking = false; renderPush(); }
+}
+// the service sends the test in the next minute it checks (with ~10 s to save first)
+async function pushTest(){
+  pushWorking = true; pushSay("Gönderiliyor…");
+  try{
+    const at = Math.ceil((Date.now() + 10000) / 60000) * 60000;
+    let found = false;
+    const mark = doc=>{ const s = doc.subs.find(x=>pushReg && x.id === pushReg.id); if(!s) return false; s.test = at; found = true; };
+    await editPushFile(mark);
+    if(!found){ await pushSave(await pushSubscription(true)); await editPushFile(mark); }   // entry was missing: register again
+    if(!found) throw new Error("bu cihaz kayıtlı değil, bildirimleri kapatıp yeniden aç");
+    pushSay(`Test bildirimi saat ${hhmm(at)} olunca gelecek. Bu arada uygulamayı kapatabilirsin.`);
+  }catch(e){ pushSay("Gönderilemedi: " + pushError(e), true); }
+  finally{ pushWorking = false; renderPush(); }
+}
+// keep this device's entry current: iOS can renew the push address, re-register quietly if it changed
+async function pushRefresh(){
+  if(pushReg && syncCfg && pushSupported() && Notification.permission === "granted"){
+    try{
+      const sub = await pushSubscription(true);
+      pushSubOk = !!sub;
+      if(sub && sub.endpoint !== pushReg.endpoint) await pushSave(sub);
+    }catch(e){ pushSubOk = false; }
+  }
+  renderPush();
+}
+document.getElementById("pushOnBtn").onclick = pushEnable;
+document.getElementById("pushTestBtn").onclick = pushTest;
+document.getElementById("pushOffBtn").onclick = pushDisable;
+document.addEventListener("visibilitychange", ()=>{ if(document.visibilityState === "visible") pushRefresh(); });
+pushRefresh();
 
 // one-time normalize: within each day, active tasks first, completed at the bottom
 (function(){

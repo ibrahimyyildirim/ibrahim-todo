@@ -1,0 +1,19 @@
+name = "ibrahim-todo-push"
+main = "worker.js"
+compatibility_date = "2025-01-01"
+# no public URL: the worker only runs on its schedule
+workers_dev = false
+preview_urls = false
+
+# check alarms every minute
+[triggers]
+crons = ["* * * * *"]
+
+[vars]
+REPO = "ibrahimyyildirim/ibrahim-todo-data"
+TODO_FILE = "todo.json"
+PUSH_FILE = "push.json"
+APP_URL = "https://ibrahimyyildirim.github.io/ibrahim-todo/"
+VAPID_SUBJECT = "https://ibrahimyyildirim.github.io/ibrahim-todo/"
+
+# secrets (wrangler secret put): GITHUB_TOKEN, VAPID_PRIVATE_JWK
