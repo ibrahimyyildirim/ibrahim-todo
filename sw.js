@@ -1,6 +1,6 @@
 // İbrahim ToDo service worker: lets the home-screen app open without internet.
 // Notes themselves live in localStorage on each device; this only caches the app files.
-const CACHE = "ibrahim-todo-cache-v1";
+const CACHE = "ibrahim-todo-cache-v2";
 const CORE = [
   "./",
   "./index.html",
@@ -27,17 +27,23 @@ self.addEventListener("fetch", e => {
   if (req.method !== "GET") return;
   const url = new URL(req.url);
 
-  // the page itself: network first so updates show up, cached copy when offline
+  // the page itself: network first so updates show up, cached copy when offline.
+  // Only a successful load replaces the cached copy; if GitHub Pages answers with an
+  // error page (404/5xx), keep showing the last good version instead of caching the error.
   if (req.mode === "navigate") {
-    e.respondWith(
-      fetch(req)
-        .then(res => {
+    e.respondWith((async () => {
+      try {
+        const res = await fetch(req);
+        if (res.ok) {
           const copy = res.clone();
           caches.open(CACHE).then(c => c.put("./index.html", copy));
           return res;
-        })
-        .catch(() => caches.match("./index.html"))
-    );
+        }
+        return (await caches.match("./index.html")) || res;
+      } catch (err) {
+        return (await caches.match("./index.html")) || Response.error();
+      }
+    })());
     return;
   }
 
